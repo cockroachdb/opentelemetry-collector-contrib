@@ -29,6 +29,9 @@ func TestLoadConfig(t *testing.T) {
 
 	defaultRetrySettings := exporterhelper.NewDefaultRetrySettings()
 
+	sharedCredentialsFileConfig := awsutil.CreateDefaultSessionConfig()
+	sharedCredentialsFileConfig.SharedCredentialsFile = "temp-file-path"
+
 	tests := []struct {
 		id           component.ID
 		expected     component.Config
@@ -67,6 +70,21 @@ func TestLoadConfig(t *testing.T) {
 					Enabled:      true,
 					NumConsumers: 1,
 					QueueSize:    2,
+				},
+			},
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "shared_credentials_file"),
+			expected: &Config{
+				RetrySettings:      defaultRetrySettings,
+				LogGroupName:       "test-1",
+				LogStreamName:      "testing",
+				Endpoint:           "",
+				AWSSessionSettings: sharedCredentialsFileConfig,
+				QueueSettings: exporterhelper.QueueSettings{
+					Enabled:      true,
+					NumConsumers: 1,
+					QueueSize:    exporterhelper.NewDefaultQueueSettings().QueueSize,
 				},
 			},
 		},
