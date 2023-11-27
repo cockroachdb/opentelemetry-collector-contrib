@@ -25,7 +25,7 @@ import (
 )
 
 type ConnAttr interface {
-	newAWSSession(logger *zap.Logger, roleArn string, region string) (*session.Session, error)
+	newAWSSession(logger *zap.Logger, roleArn, sharedCredentialsFile, region string) (*session.Session, error)
 	getEC2Region(s *session.Session) (string, error)
 }
 
@@ -145,7 +145,7 @@ func GetAWSConfigSession(logger *zap.Logger, cn ConnAttr, cfg *AWSSessionSetting
 		logger.Error(msg)
 		return nil, nil, awserr.New("NoAwsRegion", msg, nil)
 	}
-	s, err = cn.newAWSSession(logger, cfg.RoleARN, awsRegion)
+	s, err = cn.newAWSSession(logger, cfg.RoleARN, cfg.SharedCredentialsFile, awsRegion)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -193,23 +193,33 @@ func ProxyServerTransport(logger *zap.Logger, config *AWSSessionSettings) (*http
 	return transport, nil
 }
 
-func (c *Conn) newAWSSession(logger *zap.Logger, roleArn string, region string) (*session.Session, error) {
+func (c *Conn) newAWSSession(
+	logger *zap.Logger, roleArn string, sharedCredentialsFile string, region string,
+) (*session.Session, error) {
 	var s *session.Session
 	var err error
-	if roleArn == "" {
-		s, err = GetDefaultSession(logger)
+	if sharedCredentialsFile != "" {
+		// profile defaults to "default" or the "AWS_PROFILE" environment variable.
+		sharedCreds := credentials.NewSharedCredentials(sharedCredentialsFile, "" /* profile */)
+		s, err = session.NewSession(&aws.Config{
+			Credentials: sharedCreds,
+		})
 		if err != nil {
+			logger.Error("Error in creating session object via sharedCredentialsFile: ", zap.Error(err))
 			return s, err
 		}
-	} else {
+	} else if roleArn != "" {
 		stsCreds, _ := getSTSCreds(logger, region, roleArn)
-
 		s, err = session.NewSession(&aws.Config{
 			Credentials: stsCreds,
 		})
-
 		if err != nil {
-			logger.Error("Error in creating session object : ", zap.Error(err))
+			logger.Error("Error in creating session object via roleArn: ", zap.Error(err))
+			return s, err
+		}
+	} else {
+		s, err = GetDefaultSession(logger)
+		if err != nil {
 			return s, err
 		}
 	}

@@ -32,7 +32,7 @@ func (c *mockConn) getEC2Region(_ *session.Session) (string, error) {
 	return ec2Region, nil
 }
 
-func (c *mockConn) newAWSSession(_ *zap.Logger, _ string, _ string) (*session.Session, error) {
+func (c *mockConn) newAWSSession(_ *zap.Logger, _ string, _ string, _ string) (*session.Session, error) {
 	return c.sn, nil
 }
 
@@ -104,17 +104,46 @@ func TestGetAWSConfigSessionWithEC2RegionErr(t *testing.T) {
 func TestNewAWSSessionWithErr(t *testing.T) {
 	logger := zap.NewNop()
 	roleArn := "fake_arn"
+	sharedCredentialFile := "fake_credentials_file"
 	region := "fake_region"
+	conn := &Conn{}
+
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	t.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "fake")
-	conn := &Conn{}
-	se, err := conn.newAWSSession(logger, roleArn, region)
+	se, err := conn.newAWSSession(logger, roleArn, sharedCredentialFile, region)
 	assert.Error(t, err)
 	assert.Nil(t, se)
+
 	roleArn = ""
-	se, err = conn.newAWSSession(logger, roleArn, region)
+	sharedCredentialFile = ""
+	se, err = conn.newAWSSession(logger, roleArn, sharedCredentialFile, region)
 	assert.Error(t, err)
 	assert.Nil(t, se)
+
+	// Test that we call the credential provider.
+	t.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "")
+	roleArn = "fake_arn"
+	sharedCredentialFile = "fake_credentials_file"
+	se, err = conn.newAWSSession(logger, roleArn, sharedCredentialFile, region)
+	assert.Nil(t, err)
+	assert.NotNil(t, se)
+	creds := se.Config.Credentials
+	assert.NotNil(t, creds)
+	_, err = creds.Get()
+	assert.Error(t, err)
+	assert.Regexp(t, "failed to load shared credentials file", err.Error())
+
+	// Test that we call the STS provider.
+	sharedCredentialFile = ""
+	se, err = conn.newAWSSession(logger, roleArn, sharedCredentialFile, region)
+	assert.Nil(t, err)
+	assert.NotNil(t, se)
+	creds = se.Config.Credentials
+	assert.NotNil(t, creds)
+	_, err = creds.Get()
+	assert.Error(t, err)
+	assert.Regexp(t, "'Endpoint' configuration is required for this service", err.Error())
+
 	t.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 	t.Setenv("AWS_STS_REGIONAL_ENDPOINTS", "regional")
 	se, _ = session.NewSession(&aws.Config{
