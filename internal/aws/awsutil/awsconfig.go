@@ -26,6 +26,10 @@ type AWSSessionSettings struct {
 	ResourceARN string `mapstructure:"resource_arn"`
 	// IAM role to upload segments to a different account.
 	RoleARN string `mapstructure:"role_arn"`
+	// Per-component shared credentials file. If set, this will be used instead
+	// of the default credential resolution chain. This has a higher precedence
+	// over role_arn.
+	SharedCredentialsFile string `mapstructure:"shared_credentials_file"`
 }
 
 func CreateDefaultSessionConfig() AWSSessionSettings {
@@ -40,5 +44,6 @@ func CreateDefaultSessionConfig() AWSSessionSettings {
 		LocalMode:             false,
 		ResourceARN:           "",
 		RoleARN:               "",
+		SharedCredentialsFile: "",
 	}
 }
