@@ -6,7 +6,8 @@ package arrow // import "github.com/open-telemetry/opentelemetry-collector-contr
 import (
 	"context"
 	"errors"
-	"math/rand"
+	"math/rand/v2"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
 	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configcompression"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -23,7 +25,41 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/grpcutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/otelarrow/netstats"
+)
+
+// Defaults settings should use relatively few resources, so that
+// users are required to explicitly configure large instances.
+var (
+	// DefaultNumStreams is half the number of CPUs.  This is
+	// selected as an estimate of relatively how much work is
+	// being performed by the exporter compared with other
+	// components in the system.
+	DefaultNumStreams = max(1, runtime.NumCPU()/2)
+)
+
+const (
+	// DefaultProducersPerStream is the factor used to configure
+	// the combined exporterhelper batch/queue function, which has
+	// a num_consumers parameter. That field is set to this factor
+	// times the number of streams by default.
+	DefaultProducersPerStream = 10
+
+	// DefaultMaxStreamLifetime is 30 seconds, because the
+	// marginal compression benefit of a longer OTel-Arrow stream
+	// is limited after 100s of batches.
+	DefaultMaxStreamLifetime = 30 * time.Second
+
+	// DefaultPayloadCompression is "zstd" so that Arrow IPC
+	// payloads use Arrow-configured Zstd over the payload
+	// independently of whatever compression gRPC may have
+	// configured.  This is on by default, achieving "double
+	// compression" because:
+	// (a) relatively cheap in CPU terms
+	// (b) minor compression benefit
+	// (c) helps stay under gRPC request size limits
+	DefaultPayloadCompression configcompression.Type = "zstd"
 )
 
 // Exporter is 1:1 with exporter, isolates arrow-specific
@@ -225,7 +261,7 @@ func addJitter(v time.Duration) time.Duration {
 	if v == 0 {
 		return 0
 	}
-	return v - time.Duration(rand.Int63n(int64(v/20)))
+	return v - time.Duration(rand.Int64N(int64(v/20)))
 }
 
 // runArrowStream begins one gRPC stream using a child of the background context.
@@ -310,6 +346,10 @@ func (e *Exporter) SendAndWait(ctx context.Context, data any) (bool, error) {
 	}
 	md["otlp-pdata-size"] = strconv.Itoa(uncompSize)
 
+	if dead, ok := ctx.Deadline(); ok {
+		md["grpc-timeout"] = grpcutil.EncodeTimeout(time.Until(dead))
+	}
+
 	wri := writeItem{
 		records:     data,
 		md:          md,
@@ -328,7 +368,6 @@ func (e *Exporter) SendAndWait(ctx context.Context, data any) (bool, error) {
 		err := writer.sendAndWait(ctx, errCh, wri)
 		if err != nil && errors.Is(err, ErrStreamRestarting) {
 			continue // an internal retry
-
 		}
 		// result from arrow server (may be nil, may be
 		// permanent, etc.)

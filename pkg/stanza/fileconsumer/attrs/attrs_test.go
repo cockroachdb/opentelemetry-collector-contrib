@@ -11,14 +11,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/filetest"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/internal/filetest"
 )
 
 func TestResolver(t *testing.T) {
 	t.Parallel()
 
 	for i := 0; i < 64; i++ {
-
 		// Create a 6 bit string where each bit represents the value of a config option
 		bitString := fmt.Sprintf("%06b", i)
 
@@ -86,7 +85,7 @@ func TestResolver(t *testing.T) {
 				assert.Empty(t, attributes[LogFileOwnerGroupName])
 				assert.Empty(t, attributes[LogFileOwnerGroupName])
 			}
-			assert.Equal(t, expectLen, len(attributes))
+			assert.Len(t, attributes, expectLen)
 		})
 	}
 }

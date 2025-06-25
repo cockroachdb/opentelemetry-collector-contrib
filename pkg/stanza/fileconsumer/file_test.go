@@ -20,10 +20,11 @@ import (
 	"go.opentelemetry.io/collector/featuregate"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/attrs"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/emit"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/emittest"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/filetest"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/reader"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/matcher"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/internal/filetest"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/testutil"
 )
@@ -141,7 +142,6 @@ func TestReadUsingNopEncoding(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.testName, func(t *testing.T) {
-
 			tempDir := t.TempDir()
 			cfg := NewConfig().includeDir(tempDir)
 			cfg.StartAt = "beginning"
@@ -152,7 +152,7 @@ func TestReadUsingNopEncoding(t *testing.T) {
 			// Create a file, then start
 			temp := filetest.OpenTemp(t, tempDir)
 			bytesWritten, err := temp.Write(tc.input)
-			require.Greater(t, bytesWritten, 0)
+			require.Positive(t, bytesWritten)
 			require.NoError(t, err)
 			require.NoError(t, operator.Start(testutil.NewUnscopedMockPersister()))
 			defer func() {
@@ -225,7 +225,6 @@ func TestNopEncodingDifferentLogSizes(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.testName, func(t *testing.T) {
-
 			tempDir := t.TempDir()
 			cfg := NewConfig().includeDir(tempDir)
 			cfg.StartAt = "beginning"
@@ -236,7 +235,7 @@ func TestNopEncodingDifferentLogSizes(t *testing.T) {
 			// Create a file, then start
 			temp := filetest.OpenTemp(t, tempDir)
 			bytesWritten, err := temp.Write(tc.input)
-			require.Greater(t, bytesWritten, 0)
+			require.Positive(t, bytesWritten)
 			require.NoError(t, err)
 			require.NoError(t, operator.Start(testutil.NewUnscopedMockPersister()))
 			defer func() {
@@ -750,7 +749,6 @@ func TestRestartOffsets(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -883,6 +881,26 @@ func TestFileBatching(t *testing.T) {
 	require.ElementsMatch(t, expectedTokens, actualTokens)
 }
 
+func TestMaxConcurrentFilesOne(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	temp1 := filetest.OpenTemp(t, tempDir)
+	_, err := temp1.WriteString("file 0: written before start\n")
+	require.NoError(t, err)
+
+	cfg := NewConfig().includeDir(tempDir)
+	cfg.StartAt = "beginning"
+	cfg.MaxConcurrentFiles = 1
+
+	sink := emittest.NewSink()
+	operator := testManagerWithSink(t, cfg, sink)
+	operator.persister = testutil.NewUnscopedMockPersister()
+	operator.poll(context.Background())
+	sink.ExpectTokens(t, []byte("file 0: written before start"))
+}
+
 func TestFileBatchingRespectsStartAtEnd(t *testing.T) {
 	t.Parallel()
 
@@ -954,6 +972,12 @@ func TestEncodings(t *testing.T) {
 			[][]byte{{0xef, 0xbf, 0xbd}},
 		},
 		{
+			"InvalidUTFWithoutReplacement",
+			[]byte{0xc5, '\n'},
+			"utf8-raw",
+			[][]byte{{0xc5}},
+		},
+		{
 			"ValidUTF8",
 			[]byte("foo\n"),
 			"utf8",
@@ -992,7 +1016,6 @@ func TestEncodings(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1151,11 +1174,6 @@ func TestMaxBatching(t *testing.T) {
 // TestReadExistingLogsWithHeader tests that, when starting from beginning, we
 // read all the lines that are already there, and parses the headers
 func TestReadExistingLogsWithHeader(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set(AllowHeaderMetadataParsing.ID(), true))
-	t.Cleanup(func() {
-		require.NoError(t, featuregate.GlobalRegistry().Set(AllowHeaderMetadataParsing.ID(), false))
-	})
-
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
@@ -1247,11 +1265,6 @@ func TestDeleteAfterRead_SkipPartials(t *testing.T) {
 }
 
 func TestHeaderPersistance(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set(AllowHeaderMetadataParsing.ID(), true))
-	t.Cleanup(func() {
-		require.NoError(t, featuregate.GlobalRegistry().Set(AllowHeaderMetadataParsing.ID(), false))
-	})
-
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
@@ -1287,11 +1300,6 @@ func TestHeaderPersistance(t *testing.T) {
 }
 
 func TestHeaderPersistanceInHeader(t *testing.T) {
-	require.NoError(t, featuregate.GlobalRegistry().Set(AllowHeaderMetadataParsing.ID(), true))
-	t.Cleanup(func() {
-		require.NoError(t, featuregate.GlobalRegistry().Set(AllowHeaderMetadataParsing.ID(), false))
-	})
-
 	tempDir := t.TempDir()
 	cfg1 := NewConfig().includeDir(tempDir)
 	cfg1.StartAt = "beginning"
@@ -1340,7 +1348,7 @@ func TestStalePartialFingerprintDiscarded(t *testing.T) {
 	file1 := filetest.OpenTempWithPattern(t, tempDir, "*.log1")
 	file2 := filetest.OpenTempWithPattern(t, tempDir, "*.log2")
 
-	// Two same fingerprint file , and smaller than  config size
+	// Two same fingerprint file , and smaller than config size
 	content := "aaaaaaaaaaa"
 	filetest.WriteString(t, file1, content+"\n")
 	filetest.WriteString(t, file2, content+"\n")
@@ -1351,7 +1359,7 @@ func TestStalePartialFingerprintDiscarded(t *testing.T) {
 	operator.wg.Wait()
 	if runtime.GOOS != "windows" {
 		// On windows, we never keep files in previousPollFiles, so we don't expect to see them here
-		require.Equal(t, len(operator.tracker.PreviousPollFiles()), 1)
+		require.Len(t, operator.tracker.PreviousPollFiles(), 1)
 	}
 
 	// keep append data to file1 and file2
@@ -1415,15 +1423,15 @@ func TestDelayedDisambiguation(t *testing.T) {
 	filetest.WriteString(t, file2, newContent2+"\n")
 	operator.poll(context.Background())
 
-	var sameTokenOtherFile emittest.Call
+	var sameTokenOtherFile emit.Token
 	if attributes[attrs.LogFileName].(string) == filepath.Base(file1.Name()) {
-		sameTokenOtherFile = emittest.Call{Token: []byte(sameContent), Attrs: map[string]any{attrs.LogFileName: filepath.Base(file2.Name())}}
+		sameTokenOtherFile = emit.Token{Body: []byte(sameContent), Attributes: map[string]any{attrs.LogFileName: filepath.Base(file2.Name())}}
 	} else {
-		sameTokenOtherFile = emittest.Call{Token: []byte(sameContent), Attrs: map[string]any{attrs.LogFileName: filepath.Base(file1.Name())}}
+		sameTokenOtherFile = emit.Token{Body: []byte(sameContent), Attributes: map[string]any{attrs.LogFileName: filepath.Base(file1.Name())}}
 	}
-	newFromFile1 := emittest.Call{Token: []byte(newContent1), Attrs: map[string]any{attrs.LogFileName: filepath.Base(file1.Name())}}
-	newFromFile2 := emittest.Call{Token: []byte(newContent2), Attrs: map[string]any{attrs.LogFileName: filepath.Base(file2.Name())}}
-	sink.ExpectCalls(t, &sameTokenOtherFile, &newFromFile1, &newFromFile2)
+	newFromFile1 := emit.Token{Body: []byte(newContent1), Attributes: map[string]any{attrs.LogFileName: filepath.Base(file1.Name())}}
+	newFromFile2 := emit.Token{Body: []byte(newContent2), Attributes: map[string]any{attrs.LogFileName: filepath.Base(file2.Name())}}
+	sink.ExpectCalls(t, sameTokenOtherFile, newFromFile1, newFromFile2)
 }
 
 func TestNoLostPartial(t *testing.T) {
@@ -1435,7 +1443,7 @@ func TestNoLostPartial(t *testing.T) {
 	operator, sink := testManager(t, cfg)
 	operator.persister = testutil.NewMockPersister("test")
 
-	// Two same fingerprint file , and smaller than  config size
+	// Two same fingerprint file , and smaller than config size
 	file1 := filetest.OpenTempWithPattern(t, tempDir, "*.log1")
 	file2 := filetest.OpenTempWithPattern(t, tempDir, "*.log2")
 

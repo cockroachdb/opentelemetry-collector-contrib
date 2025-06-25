@@ -55,12 +55,12 @@ func createDefaultConfig() component.Config {
 func createMetricsExporter(ctx context.Context, params exporter.Settings, config component.Config) (exporter.Metrics, error) {
 	expCfg := config.(*Config)
 
-	emfExp, err := newEmfExporter(expCfg, params)
+	emfExp, err := newEmfExporter(ctx, expCfg, params)
 	if err != nil {
 		return nil, err
 	}
 
-	exporter, err := exporterhelper.NewMetricsExporter(
+	exporter, err := exporterhelper.NewMetrics(
 		ctx,
 		params,
 		config,

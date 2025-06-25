@@ -5,13 +5,15 @@ package tcp
 
 import (
 	"crypto/tls"
-	"math/rand"
+	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -85,7 +87,7 @@ func tcpInputTest(input []byte, expected []string) func(t *testing.T) {
 
 		mockOutput := testutil.Operator{}
 		tcpInput := op.(*Input)
-		tcpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		tcpInput.OutputOperators = []operator.Operator{&mockOutput}
 
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -116,7 +118,7 @@ func tcpInputTest(input []byte, expected []string) func(t *testing.T) {
 
 		select {
 		case entry := <-entryChan:
-			require.FailNow(t, "Unexpected entry: %s", entry)
+			require.FailNow(t, fmt.Sprintf("Unexpected entry: %s", entry))
 		case <-time.After(100 * time.Millisecond):
 			return
 		}
@@ -135,7 +137,7 @@ func tcpInputAttributesTest(input []byte, expected []string) func(t *testing.T) 
 
 		mockOutput := testutil.Operator{}
 		tcpInput := op.(*Input)
-		tcpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		tcpInput.OutputOperators = []operator.Operator{&mockOutput}
 
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -182,7 +184,7 @@ func tcpInputAttributesTest(input []byte, expected []string) func(t *testing.T) 
 
 		select {
 		case entry := <-entryChan:
-			require.FailNow(t, "Unexpected entry: %s", entry)
+			require.FailNow(t, fmt.Sprintf("Unexpected entry: %s", entry))
 		case <-time.After(100 * time.Millisecond):
 			return
 		}
@@ -222,7 +224,7 @@ func tlsInputTest(input []byte, expected []string) func(t *testing.T) {
 
 		mockOutput := testutil.Operator{}
 		tcpInput := op.(*Input)
-		tcpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		tcpInput.OutputOperators = []operator.Operator{&mockOutput}
 
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -253,7 +255,7 @@ func tlsInputTest(input []byte, expected []string) func(t *testing.T) {
 
 		select {
 		case entry := <-entryChan:
-			require.FailNow(t, "Unexpected entry: %s", entry)
+			require.FailNow(t, fmt.Sprintf("Unexpected entry: %s", entry))
 		case <-time.After(100 * time.Millisecond):
 			return
 		}
@@ -379,7 +381,7 @@ func TestFailToBind(t *testing.T) {
 	minPort := 30000
 	maxPort := 40000
 	for i := 1; i < 10; i++ {
-		port = minPort + rand.Intn(maxPort-minPort+1)
+		port = minPort + rand.IntN(maxPort-minPort+1)
 		_, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(port)), time.Second*2)
 		if err != nil {
 			// a failed connection indicates that the port is available for use
@@ -390,7 +392,7 @@ func TestFailToBind(t *testing.T) {
 		t.Errorf("failed to find a free port between %d and %d", minPort, maxPort)
 	}
 
-	var startTCP = func(int) (*Input, error) {
+	startTCP := func(int) (*Input, error) {
 		cfg := NewConfigWithID("test_id")
 		cfg.ListenAddress = net.JoinHostPort(ip, strconv.Itoa(port))
 		set := componenttest.NewNopTelemetrySettings()
@@ -398,7 +400,7 @@ func TestFailToBind(t *testing.T) {
 		require.NoError(t, err)
 		mockOutput := testutil.Operator{}
 		tcpInput := op.(*Input)
-		tcpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		tcpInput.OutputOperators = []operator.Operator{&mockOutput}
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 			entryChan <- args.Get(1).(*entry.Entry)
@@ -427,7 +429,7 @@ func BenchmarkTCPInput(b *testing.B) {
 
 	fakeOutput := testutil.NewFakeOutput(b)
 	tcpInput := op.(*Input)
-	tcpInput.InputOperator.OutputOperators = []operator.Operator{fakeOutput}
+	tcpInput.OutputOperators = []operator.Operator{fakeOutput}
 
 	err = tcpInput.Start(testutil.NewUnscopedMockPersister())
 	require.NoError(b, err)
@@ -435,13 +437,13 @@ func BenchmarkTCPInput(b *testing.B) {
 	done := make(chan struct{})
 	go func() {
 		conn, err := net.Dial("tcp", tcpInput.listener.Addr().String())
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		defer func() {
 			err := tcpInput.Stop()
-			require.NoError(b, err, "expected to stop tcp input operator without error")
+			assert.NoError(b, err, "expected to stop tcp input operator without error")
 
 			err = conn.Close()
-			require.NoError(b, err, "expected to close connection without error")
+			assert.NoError(b, err, "expected to close connection without error")
 		}()
 		message := []byte("message\n")
 		for {
@@ -450,7 +452,7 @@ func BenchmarkTCPInput(b *testing.B) {
 				return
 			default:
 				_, err := conn.Write(message)
-				require.NoError(b, err)
+				assert.NoError(b, err)
 			}
 		}
 	}()

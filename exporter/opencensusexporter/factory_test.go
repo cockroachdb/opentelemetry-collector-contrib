@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opencensusexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 )
 
@@ -26,7 +27,7 @@ func TestCreateDefaultConfig(t *testing.T) {
 	assert.NoError(t, componenttest.CheckConfigStruct(cfg))
 }
 
-func TestCreateTracesExporter(t *testing.T) {
+func TestCreateTraces(t *testing.T) {
 	endpoint := testutil.GetAvailableLocalAddress(t)
 	tests := []struct {
 		name             string
@@ -49,7 +50,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Insecure: false,
 					},
 				},
@@ -62,7 +63,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Insecure: false,
 					},
 				},
@@ -123,7 +124,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Config: configtls.Config{
 							CAFile: "testdata/test_cert.pem",
 						},
@@ -137,7 +138,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Config: configtls.Config{
 							CAFile: "nosuchfile",
 						},
@@ -152,7 +153,7 @@ func TestCreateTracesExporter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			set := exportertest.NewNopSettings()
+			set := exportertest.NewNopSettings(metadata.Type)
 			tExporter, tErr := createTracesExporter(context.Background(), set, tt.config)
 			checkErrorsAndStartAndShutdown(t, tExporter, tErr, tt.mustFailOnCreate, tt.mustFailOnStart)
 			mExporter, mErr := createMetricsExporter(context.Background(), set, tt.config)

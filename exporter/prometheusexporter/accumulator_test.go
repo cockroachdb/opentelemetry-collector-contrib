@@ -218,7 +218,6 @@ func TestAccumulateMetrics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			ts1 := time.Now().Add(-3 * time.Second)
 			ts2 := time.Now().Add(-2 * time.Second)
 			ts3 := time.Now().Add(-1 * time.Second)
@@ -241,20 +240,19 @@ func TestAccumulateMetrics(t *testing.T) {
 
 			m2Labels, _, m2Value, m2Temporality, m2IsMonotonic := getMetricProperties(ilm2.Metrics().At(0))
 
-			signature := timeseriesSignature(ilm2.Scope().Name(), ilm2.Metrics().At(0), m2Labels, pcommon.NewMap())
+			signature := timeseriesSignature(ilm2.Scope().Name(), ilm2.Scope().Version(), ilm2.SchemaUrl(), ilm2.Scope().Attributes(), ilm2.Metrics().At(0), m2Labels, pcommon.NewMap())
 			m, ok := a.registeredMetrics.Load(signature)
 			require.True(t, ok)
 
 			v := m.(*accumulatedValue)
 			vLabels, vTS, vValue, vTemporality, vIsMonotonic := getMetricProperties(ilm2.Metrics().At(0))
 
-			require.Equal(t, v.scope.Name(), "test")
+			require.Equal(t, "test", v.scopeName)
 			require.Equal(t, v.value.Type(), ilm2.Metrics().At(0).Type())
-			vLabels.Range(func(k string, v pcommon.Value) bool {
+			for k, v := range vLabels.All() {
 				r, _ := m2Labels.Get(k)
 				require.Equal(t, r, v)
-				return true
-			})
+			}
 			require.Equal(t, m2Labels.Len(), vLabels.Len())
 			require.Equal(t, m2Value, vValue)
 			require.Equal(t, ts2.Unix(), vTS.Unix())
@@ -327,7 +325,6 @@ func TestAccumulateDeltaToCumulative(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			ts1 := time.Now().Add(-3 * time.Second)
 			ts2 := time.Now().Add(-2 * time.Second)
 			ts3 := time.Now().Add(-1 * time.Second)
@@ -353,27 +350,26 @@ func TestAccumulateDeltaToCumulative(t *testing.T) {
 			require.Equal(t, 2, n)
 
 			mLabels, _, mValue, _, _ := getMetricProperties(ilm.Metrics().At(1))
-			signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), mLabels, pcommon.NewMap())
+			signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), mLabels, pcommon.NewMap())
 			m, ok := a.registeredMetrics.Load(signature)
 			require.True(t, ok)
 
 			v := m.(*accumulatedValue)
 			vLabels, vTS, vValue, vTemporality, vIsMonotonic := getMetricProperties(v.value)
 
-			require.Equal(t, v.scope.Name(), "test")
+			require.Equal(t, "test", v.scopeName)
 			require.Equal(t, v.value.Type(), ilm.Metrics().At(0).Type())
 			require.Equal(t, v.value.Type(), ilm.Metrics().At(1).Type())
 
-			vLabels.Range(func(k string, v pcommon.Value) bool {
+			for k, v := range vLabels.All() {
 				r, _ := mLabels.Get(k)
 				require.Equal(t, r, v)
-				return true
-			})
+			}
 			require.Equal(t, mLabels.Len(), vLabels.Len())
 			require.Equal(t, mValue, vValue)
 			require.Equal(t, dataPointValue1+dataPointValue2, vValue)
 			require.Equal(t, pmetric.AggregationTemporalityCumulative, vTemporality)
-			require.Equal(t, true, vIsMonotonic)
+			require.True(t, vIsMonotonic)
 
 			require.Equal(t, ts3.Unix(), vTS.Unix())
 		})
@@ -409,7 +405,7 @@ func TestAccumulateDeltaToCumulativeHistogram(t *testing.T) {
 
 		m1 := ilm.Metrics().At(0).Histogram().DataPoints().At(0)
 		m2 := ilm.Metrics().At(1).Histogram().DataPoints().At(0)
-		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
+		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
 
 		a := newAccumulator(zap.NewNop(), 1*time.Hour).(*lastValueAccumulator)
 		n := a.Accumulate(resourceMetrics)
@@ -442,7 +438,7 @@ func TestAccumulateDeltaToCumulativeHistogram(t *testing.T) {
 
 		m1 := ilm.Metrics().At(0).Histogram().DataPoints().At(0)
 		m2 := ilm.Metrics().At(1).Histogram().DataPoints().At(0)
-		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
+		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
 
 		// should ignore metric with different buckets from the past
 		a := newAccumulator(zap.NewNop(), 1*time.Hour).(*lastValueAccumulator)
@@ -476,7 +472,7 @@ func TestAccumulateDeltaToCumulativeHistogram(t *testing.T) {
 		appendDeltaHistogram(ts1, ts2, 7, 5, []uint64{3, 1, 1, 0, 0}, []float64{0.1, 0.2, 1, 10}, ilm.Metrics())
 
 		m2 := ilm.Metrics().At(1).Histogram().DataPoints().At(0)
-		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
+		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
 
 		// should ignore metric with different buckets from the past
 		a := newAccumulator(zap.NewNop(), 1*time.Hour).(*lastValueAccumulator)
@@ -511,7 +507,7 @@ func TestAccumulateDeltaToCumulativeHistogram(t *testing.T) {
 		appendDeltaHistogram(startTs2, ts2, 7, 5, []uint64{3, 1, 1, 0, 0}, []float64{0.1, 0.2, 1, 10}, ilm.Metrics())
 
 		m1 := ilm.Metrics().At(0).Histogram().DataPoints().At(0)
-		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), m1.Attributes(), pcommon.NewMap())
+		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), m1.Attributes(), pcommon.NewMap())
 
 		a := newAccumulator(zap.NewNop(), 1*time.Hour).(*lastValueAccumulator)
 		n := a.Accumulate(resourceMetrics)
@@ -545,7 +541,7 @@ func TestAccumulateDeltaToCumulativeHistogram(t *testing.T) {
 		appendDeltaHistogram(startTs2, ts2, 7, 5, []uint64{3, 1, 1, 0, 0}, []float64{0.1, 0.2, 1, 10}, ilm.Metrics())
 
 		m2 := ilm.Metrics().At(1).Histogram().DataPoints().At(0)
-		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
+		signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), m2.Attributes(), pcommon.NewMap())
 
 		a := newAccumulator(zap.NewNop(), 1*time.Hour).(*lastValueAccumulator)
 		n := a.Accumulate(resourceMetrics)
@@ -636,7 +632,7 @@ func TestAccumulateDroppedMetrics(t *testing.T) {
 			n := a.Accumulate(resourceMetrics)
 			require.Equal(t, 0, n)
 
-			signature := timeseriesSignature(ilm.Scope().Name(), ilm.Metrics().At(0), pcommon.NewMap(), pcommon.NewMap())
+			signature := timeseriesSignature(ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(), ilm.Metrics().At(0), pcommon.NewMap(), pcommon.NewMap())
 			v, ok := a.registeredMetrics.Load(signature)
 			require.False(t, ok)
 			require.Nil(t, v)
@@ -650,7 +646,7 @@ func TestTimeseriesSignatureNotMutating(t *testing.T) {
 	attrs.PutStr("label_1", "1")
 	origAttrs := pcommon.NewMap()
 	attrs.CopyTo(origAttrs)
-	timeseriesSignature("test_il", pmetric.NewMetric(), attrs, attrs)
+	timeseriesSignature("test_il", "1.0.0", "http://test.com", attrs, pmetric.NewMetric(), attrs, pcommon.NewMap())
 	require.Equal(t, origAttrs, attrs) // make sure attrs are not mutated
 }
 

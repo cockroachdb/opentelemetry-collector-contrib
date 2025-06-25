@@ -5,9 +5,10 @@ package ottlfuncs // import "github.com/open-telemetry/opentelemetry-collector-c
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	jsoniter "github.com/json-iterator/go"
+	"github.com/goccy/go-json"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl"
@@ -25,7 +26,7 @@ func createParseJSONFunction[K any](_ ottl.FunctionContext, oArgs ottl.Arguments
 	args, ok := oArgs.(*ParseJSONArguments[K])
 
 	if !ok {
-		return nil, fmt.Errorf("ParseJSONFactory args must be of type *ParseJSONArguments[K]")
+		return nil, errors.New("ParseJSONFactory args must be of type *ParseJSONArguments[K]")
 	}
 
 	return parseJSON(args.Target), nil
@@ -47,7 +48,7 @@ func parseJSON[K any](target ottl.StringGetter[K]) ottl.ExprFunc[K] {
 			return nil, err
 		}
 		var parsedValue any
-		err = jsoniter.UnmarshalFromString(targetVal, &parsedValue)
+		err = json.Unmarshal([]byte(targetVal), &parsedValue)
 		if err != nil {
 			return nil, err
 		}

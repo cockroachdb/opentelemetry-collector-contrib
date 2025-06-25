@@ -5,6 +5,7 @@ package logstransformprocessor
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -23,32 +24,31 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/parser/regex"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/logstransformprocessor/internal/metadata"
 )
 
-var (
-	cfg = &Config{
-		BaseConfig: adapter.BaseConfig{
-			Operators: []operator.Config{
-				{
-					Builder: func() *regex.Config {
-						cfg := regex.NewConfig()
-						cfg.Regex = "^(?P<time>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (?P<sev>[A-Z]*) (?P<msg>.*)$"
-						sevField := entry.NewAttributeField("sev")
-						sevCfg := helper.NewSeverityConfig()
-						sevCfg.ParseFrom = &sevField
-						cfg.SeverityConfig = &sevCfg
-						timeField := entry.NewAttributeField("time")
-						timeCfg := helper.NewTimeParser()
-						timeCfg.Layout = "%Y-%m-%d %H:%M:%S"
-						timeCfg.ParseFrom = &timeField
-						cfg.TimeParser = &timeCfg
-						return cfg
-					}(),
-				},
+var cfg = &Config{
+	BaseConfig: adapter.BaseConfig{
+		Operators: []operator.Config{
+			{
+				Builder: func() *regex.Config {
+					cfg := regex.NewConfig()
+					cfg.Regex = "^(?P<time>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (?P<sev>[A-Z]*) (?P<msg>.*)$"
+					sevField := entry.NewAttributeField("sev")
+					sevCfg := helper.NewSeverityConfig()
+					sevCfg.ParseFrom = &sevField
+					cfg.SeverityConfig = &sevCfg
+					timeField := entry.NewAttributeField("time")
+					timeCfg := helper.NewTimeParser()
+					timeCfg.Layout = "%Y-%m-%d %H:%M:%S"
+					timeCfg.ParseFrom = &timeField
+					cfg.TimeParser = &timeCfg
+					return cfg
+				}(),
 			},
 		},
-	}
-)
+	},
+}
 
 func parseTime(format, input string) *time.Time {
 	val, _ := time.ParseInLocation(format, input, time.Local)
@@ -143,7 +143,7 @@ func TestLogsTransformProcessor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tln := new(consumertest.LogsSink)
 			factory := NewFactory()
-			ltp, err := factory.CreateLogsProcessor(context.Background(), processortest.NewNopSettings(), tt.config, tln)
+			ltp, err := factory.CreateLogs(context.Background(), processortest.NewNopSettings(metadata.Type), tt.config, tln)
 			require.NoError(t, err)
 			assert.True(t, ltp.Capabilities().MutatesData)
 
@@ -204,8 +204,15 @@ type laggyOperator struct {
 	logsCount int
 }
 
-func (t *laggyOperator) Process(ctx context.Context, e *entry.Entry) error {
+func (t *laggyOperator) ProcessBatch(ctx context.Context, entries []*entry.Entry) error {
+	var errs []error
+	for i := range entries {
+		errs = append(errs, t.Process(ctx, entries[i]))
+	}
+	return errors.Join(errs...)
+}
 
+func (t *laggyOperator) Process(ctx context.Context, e *entry.Entry) error {
 	// Wait for a large amount of time every 100 logs
 	if t.logsCount%100 == 0 {
 		time.Sleep(100 * time.Millisecond)
@@ -254,7 +261,7 @@ func TestProcessorShutdownWithSlowOperator(t *testing.T) {
 
 	tln := new(consumertest.LogsSink)
 	factory := NewFactory()
-	ltp, err := factory.CreateLogsProcessor(context.Background(), processortest.NewNopSettings(), config, tln)
+	ltp, err := factory.CreateLogs(context.Background(), processortest.NewNopSettings(metadata.Type), config, tln)
 	require.NoError(t, err)
 	assert.True(t, ltp.Capabilities().MutatesData)
 

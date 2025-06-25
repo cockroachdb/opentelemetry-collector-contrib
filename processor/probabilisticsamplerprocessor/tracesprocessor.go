@@ -90,7 +90,7 @@ func (tc *tracestateCarrier) clearThreshold() {
 
 func (tc *tracestateCarrier) reserialize() error {
 	var w strings.Builder
-	err := tc.W3CTraceState.Serialize(&w)
+	err := tc.Serialize(&w)
 	if err == nil {
 		tc.span.TraceState().FromRaw(w.String())
 	}
@@ -111,7 +111,7 @@ func newTracesProcessor(ctx context.Context, set processor.Settings, cfg *Config
 		logger:           set.Logger,
 		telemetryBuilder: telemetryBuilder,
 	}
-	return processorhelper.NewTracesProcessor(
+	return processorhelper.NewTraces(
 		ctx,
 		set,
 		cfg,

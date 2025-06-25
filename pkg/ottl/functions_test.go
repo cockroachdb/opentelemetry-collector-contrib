@@ -25,6 +25,11 @@ func Test_NewFunctionCall_invalid(t *testing.T) {
 			functionThatHasAnError,
 		),
 		createFactory[any](
+			"testing_pmapgetsetter",
+			&pMapGetSetterArguments{},
+			functionWithPMapGetSetter,
+		),
+		createFactory[any](
 			"testing_getsetter",
 			&getSetterArguments{},
 			functionWithGetSetter,
@@ -107,6 +112,19 @@ func Test_NewFunctionCall_invalid(t *testing.T) {
 					{
 						Value: value{
 							String: (ottltest.Strp("SHA256")),
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "not accessor (pmap)",
+			inv: editor{
+				Function: "testing_pmapgetsetter",
+				Arguments: []argument{
+					{
+						Value: value{
+							String: ottltest.Strp("not path"),
 						},
 					},
 				},
@@ -392,6 +410,30 @@ func Test_NewFunctionCall_invalid(t *testing.T) {
 			},
 		},
 		{
+			name: "path parts not all used (pmap)",
+			inv: editor{
+				Function: "testing_pmapgetsetter",
+				Arguments: []argument{
+					{
+						Value: value{
+							Literal: &mathExprLiteral{
+								Path: &path{
+									Fields: []field{
+										{
+											Name: "name",
+										},
+										{
+											Name: "not-used",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "path parts not all used",
 			inv: editor{
 				Function: "testing_getsetter",
@@ -406,6 +448,35 @@ func Test_NewFunctionCall_invalid(t *testing.T) {
 										},
 										{
 											Name: "not-used",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Keys not allowed (pmap)",
+			inv: editor{
+				Function: "testing_pmapgetsetter",
+				Arguments: []argument{
+					{
+						Value: value{
+							Literal: &mathExprLiteral{
+								Path: &path{
+									Fields: []field{
+										{
+											Name: "name",
+											Keys: []key{
+												{
+													String: ottltest.Strp("foo"),
+												},
+												{
+													String: ottltest.Strp("bar"),
+												},
+											},
 										},
 									},
 								},
@@ -805,6 +876,28 @@ func Test_NewFunctionCall(t *testing.T) {
 				},
 			},
 			want: 2,
+		},
+		{
+			name: "pmapgetsetter arg",
+			inv: editor{
+				Function: "testing_pmapgetsetter",
+				Arguments: []argument{
+					{
+						Value: value{
+							Literal: &mathExprLiteral{
+								Path: &path{
+									Fields: []field{
+										{
+											Name: "name",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
 		},
 		{
 			name: "pmapgetter slice arg",
@@ -1453,6 +1546,36 @@ func Test_NewFunctionCall(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "Complex Indexing (pmap)",
+			inv: editor{
+				Function: "testing_pmapgetsetter",
+				Arguments: []argument{
+					{
+						Value: value{
+							Literal: &mathExprLiteral{
+								Path: &path{
+									Fields: []field{
+										{
+											Name: "attributes",
+											Keys: []key{
+												{
+													String: ottltest.Strp("foo"),
+												},
+												{
+													String: ottltest.Strp("bar"),
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		{
 			name: "Complex Indexing",
 			inv: editor{
 				Function: "testing_getsetter",
@@ -1472,6 +1595,28 @@ func Test_NewFunctionCall(t *testing.T) {
 													String: ottltest.Strp("bar"),
 												},
 											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "path that allows keys but none have been specified (pmap)",
+			inv: editor{
+				Function: "testing_pmapgetsetter",
+				Arguments: []argument{
+					{
+						Value: value{
+							Literal: &mathExprLiteral{
+								Path: &path{
+									Fields: []field{
+										{
+											Name: "attributes",
 										},
 									},
 								},
@@ -1615,7 +1760,7 @@ func functionWithNoArguments() (ExprFunc[any], error) {
 func functionWithErr() (ExprFunc[any], error) {
 	return func(context.Context, any) (any, error) {
 		return nil, nil
-	}, fmt.Errorf("error")
+	}, errors.New("error")
 }
 
 type stringSliceArguments struct {
@@ -1888,6 +2033,16 @@ func functionWithByteSliceLikeGetter(ByteSliceLikeGetter[any]) (ExprFunc[any], e
 	}, nil
 }
 
+type pMapGetSetterArguments struct {
+	PMapGetSetterArg PMapGetSetter[any]
+}
+
+func functionWithPMapGetSetter(PMapGetSetter[any]) (ExprFunc[any], error) {
+	return func(context.Context, any) (any, error) {
+		return "anything", nil
+	}, nil
+}
+
 type pMapGetterArguments struct {
 	PMapArg PMapGetter[any]
 }
@@ -2003,7 +2158,7 @@ func createFactory[A any](name string, args A, fn any) Factory[any] {
 		funcVal := reflect.ValueOf(fn)
 
 		if funcVal.Kind() != reflect.Func {
-			return nil, fmt.Errorf("a non-function value was passed to createFactory")
+			return nil, errors.New("a non-function value was passed to createFactory")
 		}
 
 		argsVal := reflect.ValueOf(fArgs).Elem()
@@ -2108,6 +2263,11 @@ func defaultFunctionsForTests() map[string]Factory[any] {
 			"testing_setter",
 			&setterArguments{},
 			functionWithSetter,
+		),
+		createFactory[any](
+			"testing_pmapgetsetter",
+			&pMapGetSetterArguments{},
+			functionWithPMapGetSetter,
 		),
 		createFactory[any](
 			"testing_getsetter",
@@ -2230,6 +2390,14 @@ func Test_basePath_Name(t *testing.T) {
 	assert.Equal(t, "test", n)
 }
 
+func Test_basePath_Context(t *testing.T) {
+	bp := basePath[any]{
+		context: "log",
+	}
+	n := bp.Context()
+	assert.Equal(t, "log", n)
+}
+
 func Test_basePath_Next(t *testing.T) {
 	bp := basePath[any]{
 		nextPath: &basePath[any]{},
@@ -2247,7 +2415,7 @@ func Test_basePath_Keys(t *testing.T) {
 		},
 	}
 	ks := bp.Keys()
-	assert.Equal(t, 1, len(ks))
+	assert.Len(t, ks, 1)
 	assert.Equal(t, k, ks[0])
 }
 
@@ -2352,6 +2520,13 @@ func Test_basePath_NextWithIsComplete(t *testing.T) {
 }
 
 func Test_newPath(t *testing.T) {
+	ps, _ := NewParser[any](
+		defaultFunctionsForTests(),
+		testParsePath[any],
+		componenttest.NewNopTelemetrySettings(),
+		WithEnumParser[any](testParseEnum),
+	)
+
 	fields := []field{
 		{
 			Name: "body",
@@ -2365,7 +2540,8 @@ func Test_newPath(t *testing.T) {
 			},
 		},
 	}
-	np, err := newPath[any](fields)
+
+	np, err := ps.newPath(&path{Fields: fields})
 	assert.NoError(t, err)
 	p := Path[any](np)
 	assert.Equal(t, "body", p.Name())
@@ -2375,13 +2551,117 @@ func Test_newPath(t *testing.T) {
 	assert.Equal(t, "string", p.Name())
 	assert.Equal(t, "body.string[key]", p.String())
 	assert.Nil(t, p.Next())
-	assert.Equal(t, 1, len(p.Keys()))
+	assert.Len(t, p.Keys(), 1)
 	v, err := p.Keys()[0].String(context.Background(), struct{}{})
 	assert.NoError(t, err)
 	assert.Equal(t, "key", *v)
 	i, err := p.Keys()[0].Int(context.Background(), struct{}{})
 	assert.NoError(t, err)
 	assert.Nil(t, i)
+}
+
+func Test_newPath_WithPathContextNames(t *testing.T) {
+	tests := []struct {
+		name             string
+		pathContext      string
+		pathContextNames []string
+		expectedError    string
+	}{
+		{
+			name:             "with no path context",
+			pathContextNames: []string{"log"},
+			expectedError:    `missing context name for path "body.string[key]", valid options are: "log.body.string[key]"`,
+		},
+		{
+			name: "with no path context and configuration",
+		},
+		{
+			name:             "with valid path context",
+			pathContext:      "log",
+			pathContextNames: []string{"log"},
+		},
+		{
+			name:             "with invalid path context",
+			pathContext:      "span",
+			pathContextNames: []string{"log"},
+			expectedError:    `context "span" from path "span.body.string[key]" is not valid, it must be replaced by one of: "log"`,
+		},
+		{
+			name:             "with multiple configured contexts",
+			pathContext:      "span",
+			pathContextNames: []string{"log", "span"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps, _ := NewParser[any](
+				defaultFunctionsForTests(),
+				testParsePath[any],
+				componenttest.NewNopTelemetrySettings(),
+				WithEnumParser[any](testParseEnum),
+				WithPathContextNames[any](tt.pathContextNames),
+			)
+
+			gp := &path{
+				Context: tt.pathContext,
+				Fields: []field{
+					{
+						Name: "body",
+					},
+					{
+						Name: "string",
+						Keys: []key{
+							{
+								String: ottltest.Strp("key"),
+							},
+						},
+					},
+				},
+			}
+
+			np, err := ps.newPath(gp)
+			if tt.expectedError != "" {
+				assert.Error(t, err, tt.expectedError)
+				return
+			}
+			assert.NoError(t, err)
+			p := Path[any](np)
+			contextParsedAsField := len(tt.pathContextNames) == 0 && tt.pathContext != ""
+			if contextParsedAsField {
+				assert.Equal(t, tt.pathContext, p.Name())
+				assert.Empty(t, p.Context())
+				assert.Nil(t, p.Keys())
+				p = p.Next()
+			}
+			var bodyStringFuncValue string
+			if tt.pathContext != "" {
+				bodyStringFuncValue = fmt.Sprintf("%s.body.string[key]", tt.pathContext)
+			} else {
+				bodyStringFuncValue = "body.string[key]"
+			}
+			assert.Equal(t, "body", p.Name())
+			assert.Nil(t, p.Keys())
+			assert.Equal(t, bodyStringFuncValue, p.String())
+			if !contextParsedAsField {
+				assert.Equal(t, tt.pathContext, p.Context())
+			}
+			p = p.Next()
+			assert.Equal(t, "string", p.Name())
+			assert.Equal(t, bodyStringFuncValue, p.String())
+			if !contextParsedAsField {
+				assert.Equal(t, tt.pathContext, p.Context())
+			}
+			assert.Nil(t, p.Next())
+			assert.Len(t, p.Keys(), 1)
+			v, err := p.Keys()[0].String(context.Background(), struct{}{})
+			assert.NoError(t, err)
+			assert.Equal(t, "key", *v)
+			i, err := p.Keys()[0].Int(context.Background(), struct{}{})
+			assert.NoError(t, err)
+			assert.Nil(t, i)
+		})
+	}
 }
 
 func Test_baseKey_String(t *testing.T) {
@@ -2405,6 +2685,13 @@ func Test_baseKey_Int(t *testing.T) {
 }
 
 func Test_newKey(t *testing.T) {
+	ps, _ := NewParser[any](
+		defaultFunctionsForTests(),
+		testParsePath[any],
+		componenttest.NewNopTelemetrySettings(),
+		WithEnumParser[any](testParseEnum),
+		WithPathContextNames[any]([]string{"log"}),
+	)
 	keys := []key{
 		{
 			String: ottltest.Strp("foo"),
@@ -2413,9 +2700,9 @@ func Test_newKey(t *testing.T) {
 			String: ottltest.Strp("bar"),
 		},
 	}
-	ks := newKeys[any](keys)
+	ks, _ := ps.newKeys(keys)
 
-	assert.Equal(t, 2, len(ks))
+	assert.Len(t, ks, 2)
 
 	s, err := ks[0].String(context.Background(), nil)
 	assert.NoError(t, err)

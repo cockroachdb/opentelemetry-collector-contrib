@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/filetest"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/fingerprint"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/scanner"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/internal/filetest"
 )
 
 func TestReaderUpdateFingerprint(t *testing.T) {
@@ -296,7 +296,7 @@ func (tc updateFingerprintTest) run(bufferSize int) func(*testing.T) {
 
 		i, err := temp.Write(tc.moreBytes)
 		require.NoError(t, err)
-		require.Equal(t, i, len(tc.moreBytes))
+		require.Len(t, tc.moreBytes, i)
 
 		r.ReadToEnd(context.Background())
 

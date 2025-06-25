@@ -41,7 +41,8 @@ func TestPrometheusConverter_addGaugeNumberDataPoints(t *testing.T) {
 							{
 								Value:     1,
 								Timestamp: convertTimeStamp(pcommon.Timestamp(ts)),
-							}},
+							},
+						},
 					},
 				}
 			},
@@ -93,7 +94,8 @@ func TestPrometheusConverter_addSumNumberDataPoints(t *testing.T) {
 							{
 								Value:     1,
 								Timestamp: convertTimeStamp(ts),
-							}},
+							},
+						},
 					},
 				}
 			},
@@ -147,20 +149,11 @@ func TestPrometheusConverter_addSumNumberDataPoints(t *testing.T) {
 				labels := []prompb.Label{
 					{Name: model.MetricNameLabel, Value: "test_sum"},
 				}
-				createdLabels := []prompb.Label{
-					{Name: model.MetricNameLabel, Value: "test_sum" + createdSuffix},
-				}
 				return map[uint64]*prompb.TimeSeries{
 					timeSeriesSignature(labels): {
 						Labels: labels,
 						Samples: []prompb.Sample{
 							{Value: 1, Timestamp: convertTimeStamp(ts)},
-						},
-					},
-					timeSeriesSignature(createdLabels): {
-						Labels: createdLabels,
-						Samples: []prompb.Sample{
-							{Value: float64(convertTimeStamp(ts)), Timestamp: convertTimeStamp(ts)},
 						},
 					},
 				}
@@ -230,7 +223,7 @@ func TestPrometheusConverter_addSumNumberDataPoints(t *testing.T) {
 				metric.Sum().DataPoints(),
 				pcommon.NewResource(),
 				metric,
-				Settings{ExportCreatedMetric: true},
+				Settings{},
 				metric.Name(),
 			)
 

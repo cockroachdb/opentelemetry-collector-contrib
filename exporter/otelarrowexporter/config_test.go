@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
+	"go.opentelemetry.io/collector/confmap/xconfmap"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/otelarrowexporter/internal/arrow"
@@ -33,7 +34,7 @@ func TestUnmarshalDefaultConfig(t *testing.T) {
 	cfg := factory.CreateDefaultConfig()
 	assert.NoError(t, cm.Unmarshal(cfg))
 	assert.Equal(t, factory.CreateDefaultConfig(), cfg)
-	assert.Equal(t, "round_robin", cfg.(*Config).ClientConfig.BalancerName)
+	assert.Equal(t, "round_robin", cfg.(*Config).BalancerName)
 	assert.Equal(t, arrow.DefaultPrioritizer, cfg.(*Config).Arrow.Prioritizer)
 }
 
@@ -45,7 +46,7 @@ func TestUnmarshalConfig(t *testing.T) {
 	assert.NoError(t, cm.Unmarshal(cfg))
 	assert.Equal(t,
 		&Config{
-			TimeoutSettings: exporterhelper.TimeoutSettings{
+			TimeoutSettings: exporterhelper.TimeoutConfig{
 				Timeout: 10 * time.Second,
 			},
 			RetryConfig: configretry.BackOffConfig{
@@ -56,10 +57,17 @@ func TestUnmarshalConfig(t *testing.T) {
 				MaxInterval:         1 * time.Minute,
 				MaxElapsedTime:      10 * time.Minute,
 			},
-			QueueSettings: exporterhelper.QueueSettings{
-				Enabled:      true,
-				NumConsumers: 2,
-				QueueSize:    10,
+			QueueSettings: exporterhelper.QueueBatchConfig{
+				Enabled:         true,
+				NumConsumers:    2,
+				QueueSize:       10,
+				Sizer:           exporterhelper.RequestSizerTypeItems,
+				BlockOnOverflow: true,
+				Batch: &exporterhelper.BatchConfig{
+					FlushTimeout: 200 * time.Millisecond,
+					MinSize:      1000,
+					MaxSize:      10000,
+				},
 			},
 			ClientConfig: configgrpc.ClientConfig{
 				Headers: map[string]configopaque.String{
@@ -69,7 +77,7 @@ func TestUnmarshalConfig(t *testing.T) {
 				},
 				Endpoint:    "1.2.3.4:1234",
 				Compression: "none",
-				TLSSetting: configtls.ClientConfig{
+				TLS: configtls.ClientConfig{
 					Config: configtls.Config{
 						CAFile: "/var/lib/mycert.pem",
 					},
@@ -82,7 +90,7 @@ func TestUnmarshalConfig(t *testing.T) {
 				},
 				WriteBufferSize: 512 * 1024,
 				BalancerName:    "experimental",
-				Auth:            &configauth.Authentication{AuthenticatorID: component.NewID(component.MustNewType("nop"))},
+				Auth:            &configauth.Config{AuthenticatorID: component.NewID(component.MustNewType("nop"))},
 			},
 			Arrow: ArrowConfig{
 				NumStreams:         2,
@@ -127,7 +135,7 @@ func TestDefaultConfigValid(t *testing.T) {
 	// this must be set by the user and config
 	// validation always checks that a value is set.
 	cfg.(*Config).Arrow.MaxStreamLifetime = 2 * time.Second
-	require.NoError(t, component.ValidateConfig(cfg))
+	require.NoError(t, xconfmap.Validate(cfg))
 }
 
 func TestArrowConfigPayloadCompressionZstd(t *testing.T) {

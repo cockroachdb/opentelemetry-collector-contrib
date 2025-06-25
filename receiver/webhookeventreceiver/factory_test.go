@@ -16,7 +16,7 @@ import (
 
 func TestFactoryCreate(t *testing.T) {
 	factory := NewFactory()
-	require.EqualValues(t, metadata.Type, factory.Type())
+	require.Equal(t, metadata.Type, factory.Type())
 }
 
 func TestDefaultConfig(t *testing.T) {
@@ -24,7 +24,7 @@ func TestDefaultConfig(t *testing.T) {
 	require.NotNil(t, cfg, "Failed to create default configuration")
 }
 
-func TestCreateLogsReceiver(t *testing.T) {
+func TestCreateLogs(t *testing.T) {
 	tests := []struct {
 		desc string
 		run  func(t *testing.T)
@@ -40,7 +40,7 @@ func TestCreateLogsReceiver(t *testing.T) {
 
 				_, err := createLogsReceiver(
 					context.Background(),
-					receivertest.NewNopSettings(),
+					receivertest.NewNopSettings(metadata.Type),
 					cfg,
 					consumertest.NewNop(),
 				)

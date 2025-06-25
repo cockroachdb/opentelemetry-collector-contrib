@@ -42,10 +42,22 @@ const (
 	stsAwsCnPartitionIDSuffix = ".amazonaws.com.cn" // AWS China partition.
 )
 
-var newAWSSession = func(roleArn string, region string, log *zap.Logger) (*session.Session, error) {
+var newAWSSession = func(roleArn string, sharedCredentialsFile string, region string, log *zap.Logger) (*session.Session, error) {
 	sts := &stsCalls{log: log, getSTSCredsFromRegionEndpoint: getSTSCredsFromRegionEndpoint}
 
-	if roleArn == "" {
+	var s *session.Session
+	var err error
+	if sharedCredentialsFile != "" {
+		// profile defaults to "default" or the "AWS_PROFILE" environment variable.
+		sharedCreds := credentials.NewSharedCredentials(sharedCredentialsFile, "" /* profile */)
+		s, err = session.NewSession(&aws.Config{
+			Credentials: sharedCreds,
+		})
+		if err != nil {
+			log.Error("Error in creating session object via sharedCredentialsFile: ", zap.Error(err))
+			return s, err
+		}
+	} else if roleArn == "" {
 		sess, err := session.NewSession()
 		if err != nil {
 			return nil, err
@@ -60,7 +72,6 @@ var newAWSSession = func(roleArn string, region string, log *zap.Logger) (*sessi
 	sess, err := session.NewSession(&aws.Config{
 		Credentials: stsCreds,
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +188,7 @@ func getRegionFromECSMetadata() (string, error) {
 // proxyServerTransport configures HTTP transport for TCP Proxy Server.
 func proxyServerTransport(config *Config) (*http.Transport, error) {
 	tls := &tls.Config{
-		InsecureSkipVerify: config.TLSSetting.Insecure,
+		InsecureSkipVerify: config.TLS.Insecure,
 	}
 
 	proxyAddr := getProxyAddress(config.ProxyAddress)
@@ -266,9 +277,10 @@ func getSTSRegionalEndpoint(r string) string {
 	p := getPartition(r)
 
 	var e string
-	if p == endpoints.AwsPartitionID || p == endpoints.AwsUsGovPartitionID {
+	switch p {
+	case endpoints.AwsPartitionID, endpoints.AwsUsGovPartitionID:
 		e = stsEndpointPrefix + r + stsEndpointSuffix
-	} else if p == endpoints.AwsCnPartitionID {
+	case endpoints.AwsCnPartitionID:
 		e = stsEndpointPrefix + r + stsAwsCnPartitionIDSuffix
 	}
 	return e

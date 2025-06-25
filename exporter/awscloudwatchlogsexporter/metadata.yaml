@@ -6,7 +6,8 @@ status:
     beta: [logs]
   distributions: [contrib]
   codeowners:
-    active: [boostchicken, bryan-aguilar, rapphil]
+    active: [boostchicken, rapphil]
+    emeritus: [bryan-aguilar]
 
 tests:
   config:
@@ -22,3 +23,5 @@ tests:
       top:
         # See https://github.com/census-instrumentation/opencensus-go/issues/1191 for more information.
         - "go.opencensus.io/stats/view.(*worker).start"
+        - "net/http.(*persistConn).writeLoop"
+        - "internal/poll.runtime_pollWait"

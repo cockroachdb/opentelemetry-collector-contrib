@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/entry"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/attrs"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/testutil"
 )
 
@@ -62,7 +63,7 @@ func TestAddFileResolvedFields(t *testing.T) {
 
 	e := waitForOne(t, logReceived)
 	require.Equal(t, filepath.Base(symLinkPath), e.Attributes["log.file.name"])
-	require.Equal(t, symLinkPath, e.Attributes["log.file.path"])
+	require.Equal(t, symLinkPath, e.Attributes[attrs.LogFilePath])
 	require.Equal(t, filepath.Base(resolved), e.Attributes["log.file.name_resolved"])
 	require.Equal(t, resolved, e.Attributes["log.file.path_resolved"])
 	if runtime.GOOS != "windows" {
@@ -189,7 +190,7 @@ func TestReadUsingNopEncoding(t *testing.T) {
 			// Create a file, then start
 			temp := openTemp(t, tempDir)
 			bytesWritten, err := temp.Write(tc.input)
-			require.Greater(t, bytesWritten, 0)
+			require.Positive(t, bytesWritten)
 			require.NoError(t, err)
 			require.NoError(t, operator.Start(testutil.NewUnscopedMockPersister()))
 			defer func() {

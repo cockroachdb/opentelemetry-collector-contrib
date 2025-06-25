@@ -10,8 +10,194 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver"
-	conventions "go.opentelemetry.io/collector/semconv/v1.18.0"
+	conventions "go.opentelemetry.io/otel/semconv/v1.18.0"
 )
+
+var MetricsInfo = metricsInfo{
+	K8sContainerCPULimit: metricInfo{
+		Name: "k8s.container.cpu_limit",
+	},
+	K8sContainerCPURequest: metricInfo{
+		Name: "k8s.container.cpu_request",
+	},
+	K8sContainerEphemeralstorageLimit: metricInfo{
+		Name: "k8s.container.ephemeralstorage_limit",
+	},
+	K8sContainerEphemeralstorageRequest: metricInfo{
+		Name: "k8s.container.ephemeralstorage_request",
+	},
+	K8sContainerMemoryLimit: metricInfo{
+		Name: "k8s.container.memory_limit",
+	},
+	K8sContainerMemoryRequest: metricInfo{
+		Name: "k8s.container.memory_request",
+	},
+	K8sContainerReady: metricInfo{
+		Name: "k8s.container.ready",
+	},
+	K8sContainerRestarts: metricInfo{
+		Name: "k8s.container.restarts",
+	},
+	K8sContainerStorageLimit: metricInfo{
+		Name: "k8s.container.storage_limit",
+	},
+	K8sContainerStorageRequest: metricInfo{
+		Name: "k8s.container.storage_request",
+	},
+	K8sCronjobActiveJobs: metricInfo{
+		Name: "k8s.cronjob.active_jobs",
+	},
+	K8sDaemonsetCurrentScheduledNodes: metricInfo{
+		Name: "k8s.daemonset.current_scheduled_nodes",
+	},
+	K8sDaemonsetDesiredScheduledNodes: metricInfo{
+		Name: "k8s.daemonset.desired_scheduled_nodes",
+	},
+	K8sDaemonsetMisscheduledNodes: metricInfo{
+		Name: "k8s.daemonset.misscheduled_nodes",
+	},
+	K8sDaemonsetReadyNodes: metricInfo{
+		Name: "k8s.daemonset.ready_nodes",
+	},
+	K8sDeploymentAvailable: metricInfo{
+		Name: "k8s.deployment.available",
+	},
+	K8sDeploymentDesired: metricInfo{
+		Name: "k8s.deployment.desired",
+	},
+	K8sHpaCurrentReplicas: metricInfo{
+		Name: "k8s.hpa.current_replicas",
+	},
+	K8sHpaDesiredReplicas: metricInfo{
+		Name: "k8s.hpa.desired_replicas",
+	},
+	K8sHpaMaxReplicas: metricInfo{
+		Name: "k8s.hpa.max_replicas",
+	},
+	K8sHpaMinReplicas: metricInfo{
+		Name: "k8s.hpa.min_replicas",
+	},
+	K8sJobActivePods: metricInfo{
+		Name: "k8s.job.active_pods",
+	},
+	K8sJobDesiredSuccessfulPods: metricInfo{
+		Name: "k8s.job.desired_successful_pods",
+	},
+	K8sJobFailedPods: metricInfo{
+		Name: "k8s.job.failed_pods",
+	},
+	K8sJobMaxParallelPods: metricInfo{
+		Name: "k8s.job.max_parallel_pods",
+	},
+	K8sJobSuccessfulPods: metricInfo{
+		Name: "k8s.job.successful_pods",
+	},
+	K8sNamespacePhase: metricInfo{
+		Name: "k8s.namespace.phase",
+	},
+	K8sNodeCondition: metricInfo{
+		Name: "k8s.node.condition",
+	},
+	K8sPodPhase: metricInfo{
+		Name: "k8s.pod.phase",
+	},
+	K8sPodStatusReason: metricInfo{
+		Name: "k8s.pod.status_reason",
+	},
+	K8sReplicasetAvailable: metricInfo{
+		Name: "k8s.replicaset.available",
+	},
+	K8sReplicasetDesired: metricInfo{
+		Name: "k8s.replicaset.desired",
+	},
+	K8sReplicationControllerAvailable: metricInfo{
+		Name: "k8s.replication_controller.available",
+	},
+	K8sReplicationControllerDesired: metricInfo{
+		Name: "k8s.replication_controller.desired",
+	},
+	K8sResourceQuotaHardLimit: metricInfo{
+		Name: "k8s.resource_quota.hard_limit",
+	},
+	K8sResourceQuotaUsed: metricInfo{
+		Name: "k8s.resource_quota.used",
+	},
+	K8sStatefulsetCurrentPods: metricInfo{
+		Name: "k8s.statefulset.current_pods",
+	},
+	K8sStatefulsetDesiredPods: metricInfo{
+		Name: "k8s.statefulset.desired_pods",
+	},
+	K8sStatefulsetReadyPods: metricInfo{
+		Name: "k8s.statefulset.ready_pods",
+	},
+	K8sStatefulsetUpdatedPods: metricInfo{
+		Name: "k8s.statefulset.updated_pods",
+	},
+	OpenshiftAppliedclusterquotaLimit: metricInfo{
+		Name: "openshift.appliedclusterquota.limit",
+	},
+	OpenshiftAppliedclusterquotaUsed: metricInfo{
+		Name: "openshift.appliedclusterquota.used",
+	},
+	OpenshiftClusterquotaLimit: metricInfo{
+		Name: "openshift.clusterquota.limit",
+	},
+	OpenshiftClusterquotaUsed: metricInfo{
+		Name: "openshift.clusterquota.used",
+	},
+}
+
+type metricsInfo struct {
+	K8sContainerCPULimit                metricInfo
+	K8sContainerCPURequest              metricInfo
+	K8sContainerEphemeralstorageLimit   metricInfo
+	K8sContainerEphemeralstorageRequest metricInfo
+	K8sContainerMemoryLimit             metricInfo
+	K8sContainerMemoryRequest           metricInfo
+	K8sContainerReady                   metricInfo
+	K8sContainerRestarts                metricInfo
+	K8sContainerStorageLimit            metricInfo
+	K8sContainerStorageRequest          metricInfo
+	K8sCronjobActiveJobs                metricInfo
+	K8sDaemonsetCurrentScheduledNodes   metricInfo
+	K8sDaemonsetDesiredScheduledNodes   metricInfo
+	K8sDaemonsetMisscheduledNodes       metricInfo
+	K8sDaemonsetReadyNodes              metricInfo
+	K8sDeploymentAvailable              metricInfo
+	K8sDeploymentDesired                metricInfo
+	K8sHpaCurrentReplicas               metricInfo
+	K8sHpaDesiredReplicas               metricInfo
+	K8sHpaMaxReplicas                   metricInfo
+	K8sHpaMinReplicas                   metricInfo
+	K8sJobActivePods                    metricInfo
+	K8sJobDesiredSuccessfulPods         metricInfo
+	K8sJobFailedPods                    metricInfo
+	K8sJobMaxParallelPods               metricInfo
+	K8sJobSuccessfulPods                metricInfo
+	K8sNamespacePhase                   metricInfo
+	K8sNodeCondition                    metricInfo
+	K8sPodPhase                         metricInfo
+	K8sPodStatusReason                  metricInfo
+	K8sReplicasetAvailable              metricInfo
+	K8sReplicasetDesired                metricInfo
+	K8sReplicationControllerAvailable   metricInfo
+	K8sReplicationControllerDesired     metricInfo
+	K8sResourceQuotaHardLimit           metricInfo
+	K8sResourceQuotaUsed                metricInfo
+	K8sStatefulsetCurrentPods           metricInfo
+	K8sStatefulsetDesiredPods           metricInfo
+	K8sStatefulsetReadyPods             metricInfo
+	K8sStatefulsetUpdatedPods           metricInfo
+	OpenshiftAppliedclusterquotaLimit   metricInfo
+	OpenshiftAppliedclusterquotaUsed    metricInfo
+	OpenshiftClusterquotaLimit          metricInfo
+	OpenshiftClusterquotaUsed           metricInfo
+}
+
+type metricInfo struct {
+	Name string
+}
 
 type metricK8sContainerCPULimit struct {
 	data     pmetric.Metric // data buffer for generated metric.
@@ -2241,17 +2427,24 @@ type MetricsBuilder struct {
 	metricOpenshiftClusterquotaUsed           metricOpenshiftClusterquotaUsed
 }
 
-// metricBuilderOption applies changes to default metrics builder.
-type metricBuilderOption func(*MetricsBuilder)
-
-// WithStartTime sets startTime on the metrics builder.
-func WithStartTime(startTime pcommon.Timestamp) metricBuilderOption {
-	return func(mb *MetricsBuilder) {
-		mb.startTime = startTime
-	}
+// MetricBuilderOption applies changes to default metrics builder.
+type MetricBuilderOption interface {
+	apply(*MetricsBuilder)
 }
 
-func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, options ...metricBuilderOption) *MetricsBuilder {
+type metricBuilderOptionFunc func(mb *MetricsBuilder)
+
+func (mbof metricBuilderOptionFunc) apply(mb *MetricsBuilder) {
+	mbof(mb)
+}
+
+// WithStartTime sets startTime on the metrics builder.
+func WithStartTime(startTime pcommon.Timestamp) MetricBuilderOption {
+	return metricBuilderOptionFunc(func(mb *MetricsBuilder) {
+		mb.startTime = startTime
+	})
+}
+func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, options ...MetricBuilderOption) *MetricsBuilder {
 	mb := &MetricsBuilder{
 		config:                                  mbc,
 		startTime:                               pcommon.NewTimestampFromTime(time.Now()),
@@ -2387,6 +2580,24 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 	}
 	if mbc.ResourceAttributes.K8sHpaName.MetricsExclude != nil {
 		mb.resourceAttributeExcludeFilter["k8s.hpa.name"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaName.MetricsExclude)
+	}
+	if mbc.ResourceAttributes.K8sHpaScaletargetrefApiversion.MetricsInclude != nil {
+		mb.resourceAttributeIncludeFilter["k8s.hpa.scaletargetref.apiversion"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaScaletargetrefApiversion.MetricsInclude)
+	}
+	if mbc.ResourceAttributes.K8sHpaScaletargetrefApiversion.MetricsExclude != nil {
+		mb.resourceAttributeExcludeFilter["k8s.hpa.scaletargetref.apiversion"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaScaletargetrefApiversion.MetricsExclude)
+	}
+	if mbc.ResourceAttributes.K8sHpaScaletargetrefKind.MetricsInclude != nil {
+		mb.resourceAttributeIncludeFilter["k8s.hpa.scaletargetref.kind"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaScaletargetrefKind.MetricsInclude)
+	}
+	if mbc.ResourceAttributes.K8sHpaScaletargetrefKind.MetricsExclude != nil {
+		mb.resourceAttributeExcludeFilter["k8s.hpa.scaletargetref.kind"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaScaletargetrefKind.MetricsExclude)
+	}
+	if mbc.ResourceAttributes.K8sHpaScaletargetrefName.MetricsInclude != nil {
+		mb.resourceAttributeIncludeFilter["k8s.hpa.scaletargetref.name"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaScaletargetrefName.MetricsInclude)
+	}
+	if mbc.ResourceAttributes.K8sHpaScaletargetrefName.MetricsExclude != nil {
+		mb.resourceAttributeExcludeFilter["k8s.hpa.scaletargetref.name"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaScaletargetrefName.MetricsExclude)
 	}
 	if mbc.ResourceAttributes.K8sHpaUID.MetricsInclude != nil {
 		mb.resourceAttributeIncludeFilter["k8s.hpa.uid"] = filter.CreateFilter(mbc.ResourceAttributes.K8sHpaUID.MetricsInclude)
@@ -2528,7 +2739,7 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 	}
 
 	for _, op := range options {
-		op(mb)
+		op.apply(mb)
 	}
 	return mb
 }
@@ -2546,20 +2757,28 @@ func (mb *MetricsBuilder) updateCapacity(rm pmetric.ResourceMetrics) {
 }
 
 // ResourceMetricsOption applies changes to provided resource metrics.
-type ResourceMetricsOption func(pmetric.ResourceMetrics)
+type ResourceMetricsOption interface {
+	apply(pmetric.ResourceMetrics)
+}
+
+type resourceMetricsOptionFunc func(pmetric.ResourceMetrics)
+
+func (rmof resourceMetricsOptionFunc) apply(rm pmetric.ResourceMetrics) {
+	rmof(rm)
+}
 
 // WithResource sets the provided resource on the emitted ResourceMetrics.
 // It's recommended to use ResourceBuilder to create the resource.
 func WithResource(res pcommon.Resource) ResourceMetricsOption {
-	return func(rm pmetric.ResourceMetrics) {
+	return resourceMetricsOptionFunc(func(rm pmetric.ResourceMetrics) {
 		res.CopyTo(rm.Resource())
-	}
+	})
 }
 
 // WithStartTimeOverride overrides start time for all the resource metrics data points.
 // This option should be only used if different start time has to be set on metrics coming from different resources.
 func WithStartTimeOverride(start pcommon.Timestamp) ResourceMetricsOption {
-	return func(rm pmetric.ResourceMetrics) {
+	return resourceMetricsOptionFunc(func(rm pmetric.ResourceMetrics) {
 		var dps pmetric.NumberDataPointSlice
 		metrics := rm.ScopeMetrics().At(0).Metrics()
 		for i := 0; i < metrics.Len(); i++ {
@@ -2573,7 +2792,7 @@ func WithStartTimeOverride(start pcommon.Timestamp) ResourceMetricsOption {
 				dps.At(j).SetStartTimestamp(start)
 			}
 		}
-	}
+	})
 }
 
 // EmitForResource saves all the generated metrics under a new resource and updates the internal state to be ready for
@@ -2581,11 +2800,11 @@ func WithStartTimeOverride(start pcommon.Timestamp) ResourceMetricsOption {
 // needs to emit metrics from several resources. Otherwise calling this function is not required,
 // just `Emit` function can be called instead.
 // Resource attributes should be provided as ResourceMetricsOption arguments.
-func (mb *MetricsBuilder) EmitForResource(rmo ...ResourceMetricsOption) {
+func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	rm := pmetric.NewResourceMetrics()
 	rm.SetSchemaUrl(conventions.SchemaURL)
 	ils := rm.ScopeMetrics().AppendEmpty()
-	ils.Scope().SetName("github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver")
+	ils.Scope().SetName(ScopeName)
 	ils.Scope().SetVersion(mb.buildInfo.Version)
 	ils.Metrics().EnsureCapacity(mb.metricsCapacity)
 	mb.metricK8sContainerCPULimit.emit(ils.Metrics())
@@ -2633,8 +2852,8 @@ func (mb *MetricsBuilder) EmitForResource(rmo ...ResourceMetricsOption) {
 	mb.metricOpenshiftClusterquotaLimit.emit(ils.Metrics())
 	mb.metricOpenshiftClusterquotaUsed.emit(ils.Metrics())
 
-	for _, op := range rmo {
-		op(rm)
+	for _, op := range options {
+		op.apply(rm)
 	}
 	for attr, filter := range mb.resourceAttributeIncludeFilter {
 		if val, ok := rm.Resource().Attributes().Get(attr); ok && !filter.Matches(val.AsString()) {
@@ -2656,8 +2875,8 @@ func (mb *MetricsBuilder) EmitForResource(rmo ...ResourceMetricsOption) {
 // Emit returns all the metrics accumulated by the metrics builder and updates the internal state to be ready for
 // recording another set of metrics. This function will be responsible for applying all the transformations required to
 // produce metric representation defined in metadata and user config, e.g. delta or cumulative.
-func (mb *MetricsBuilder) Emit(rmo ...ResourceMetricsOption) pmetric.Metrics {
-	mb.EmitForResource(rmo...)
+func (mb *MetricsBuilder) Emit(options ...ResourceMetricsOption) pmetric.Metrics {
+	mb.EmitForResource(options...)
 	metrics := mb.metricsBuffer
 	mb.metricsBuffer = pmetric.NewMetrics()
 	return metrics
@@ -2885,9 +3104,9 @@ func (mb *MetricsBuilder) RecordOpenshiftClusterquotaUsedDataPoint(ts pcommon.Ti
 
 // Reset resets metrics builder to its initial state. It should be used when external metrics source is restarted,
 // and metrics builder should update its startTime and reset it's internal state accordingly.
-func (mb *MetricsBuilder) Reset(options ...metricBuilderOption) {
+func (mb *MetricsBuilder) Reset(options ...MetricBuilderOption) {
 	mb.startTime = pcommon.NewTimestampFromTime(time.Now())
 	for _, op := range options {
-		op(mb)
+		op.apply(mb)
 	}
 }

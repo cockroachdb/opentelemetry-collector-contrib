@@ -4,13 +4,12 @@ package metadata
 
 import (
 	"errors"
+	"sync"
 
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtelemetry"
 )
 
 func Meter(settings component.TelemetrySettings) metric.Meter {
@@ -25,43 +24,92 @@ func Tracer(settings component.TelemetrySettings) trace.Tracer {
 // as defined in metadata and user config.
 type TelemetryBuilder struct {
 	meter                                             metric.Meter
+	mu                                                sync.Mutex
+	registrations                                     []metric.Registration
+	ExporterPrometheusremotewriteConsumers            metric.Int64UpDownCounter
 	ExporterPrometheusremotewriteFailedTranslations   metric.Int64Counter
+	ExporterPrometheusremotewriteSentBatches          metric.Int64Counter
 	ExporterPrometheusremotewriteTranslatedTimeSeries metric.Int64Counter
-	level                                             configtelemetry.Level
+	ExporterPrometheusremotewriteWalReads             metric.Int64Counter
+	ExporterPrometheusremotewriteWalReadsFailures     metric.Int64Counter
+	ExporterPrometheusremotewriteWalWrites            metric.Int64Counter
+	ExporterPrometheusremotewriteWalWritesFailures    metric.Int64Counter
 }
 
-// telemetryBuilderOption applies changes to default builder.
-type telemetryBuilderOption func(*TelemetryBuilder)
+// TelemetryBuilderOption applies changes to default builder.
+type TelemetryBuilderOption interface {
+	apply(*TelemetryBuilder)
+}
 
-// WithLevel sets the current telemetry level for the component.
-func WithLevel(lvl configtelemetry.Level) telemetryBuilderOption {
-	return func(builder *TelemetryBuilder) {
-		builder.level = lvl
+type telemetryBuilderOptionFunc func(mb *TelemetryBuilder)
+
+func (tbof telemetryBuilderOptionFunc) apply(mb *TelemetryBuilder) {
+	tbof(mb)
+}
+
+// Shutdown unregister all registered callbacks for async instruments.
+func (builder *TelemetryBuilder) Shutdown() {
+	builder.mu.Lock()
+	defer builder.mu.Unlock()
+	for _, reg := range builder.registrations {
+		reg.Unregister()
 	}
 }
 
 // NewTelemetryBuilder provides a struct with methods to update all internal telemetry
 // for a component
-func NewTelemetryBuilder(settings component.TelemetrySettings, options ...telemetryBuilderOption) (*TelemetryBuilder, error) {
-	builder := TelemetryBuilder{level: configtelemetry.LevelBasic}
+func NewTelemetryBuilder(settings component.TelemetrySettings, options ...TelemetryBuilderOption) (*TelemetryBuilder, error) {
+	builder := TelemetryBuilder{}
 	for _, op := range options {
-		op(&builder)
+		op.apply(&builder)
 	}
+	builder.meter = Meter(settings)
 	var err, errs error
-	if builder.level >= configtelemetry.LevelBasic {
-		builder.meter = Meter(settings)
-	} else {
-		builder.meter = noop.Meter{}
-	}
+	builder.ExporterPrometheusremotewriteConsumers, err = builder.meter.Int64UpDownCounter(
+		"otelcol_exporter_prometheusremotewrite_consumers",
+		metric.WithDescription("Number of configured workers to use to fan out the outgoing requests"),
+		metric.WithUnit("{consumer}"),
+	)
+	errs = errors.Join(errs, err)
 	builder.ExporterPrometheusremotewriteFailedTranslations, err = builder.meter.Int64Counter(
 		"otelcol_exporter_prometheusremotewrite_failed_translations",
 		metric.WithDescription("Number of translation operations that failed to translate metrics from Otel to Prometheus"),
 		metric.WithUnit("1"),
 	)
 	errs = errors.Join(errs, err)
+	builder.ExporterPrometheusremotewriteSentBatches, err = builder.meter.Int64Counter(
+		"otelcol_exporter_prometheusremotewrite_sent_batches",
+		metric.WithDescription("Number of remote write request batches sent to the remote write endpoint regardless of success or failure"),
+		metric.WithUnit("{batch}"),
+	)
+	errs = errors.Join(errs, err)
 	builder.ExporterPrometheusremotewriteTranslatedTimeSeries, err = builder.meter.Int64Counter(
 		"otelcol_exporter_prometheusremotewrite_translated_time_series",
 		metric.WithDescription("Number of Prometheus time series that were translated from OTel metrics"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
+	builder.ExporterPrometheusremotewriteWalReads, err = builder.meter.Int64Counter(
+		"otelcol_exporter_prometheusremotewrite_wal_reads",
+		metric.WithDescription("Number of WAL reads"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
+	builder.ExporterPrometheusremotewriteWalReadsFailures, err = builder.meter.Int64Counter(
+		"otelcol_exporter_prometheusremotewrite_wal_reads_failures",
+		metric.WithDescription("Number of WAL reads that failed"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
+	builder.ExporterPrometheusremotewriteWalWrites, err = builder.meter.Int64Counter(
+		"otelcol_exporter_prometheusremotewrite_wal_writes",
+		metric.WithDescription("Number of WAL writes"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
+	builder.ExporterPrometheusremotewriteWalWritesFailures, err = builder.meter.Int64Counter(
+		"otelcol_exporter_prometheusremotewrite_wal_writes_failures",
+		metric.WithDescription("Number of WAL writes that failed"),
 		metric.WithUnit("1"),
 	)
 	errs = errors.Join(errs, err)

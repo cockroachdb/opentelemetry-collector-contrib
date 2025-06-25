@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
-	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
+	conventions "go.opentelemetry.io/otel/semconv/v1.26.0"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/apm/correlations"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/apm/log"
@@ -48,11 +48,11 @@ func TestExpiration(t *testing.T) {
 	setTime(a, time.Unix(100, 0))
 
 	fakeTraces := ptrace.NewTraces()
-	newResourceWithAttrs(hostIDDims, map[string]string{conventions.AttributeServiceName: "one", "environment": "environment1"}).
+	newResourceWithAttrs(hostIDDims, map[string]string{string(conventions.ServiceNameKey): "one", "environment": "environment1"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
-	newResourceWithAttrs(hostIDDims, map[string]string{conventions.AttributeServiceName: "two", "environment": "environment2"}).
+	newResourceWithAttrs(hostIDDims, map[string]string{string(conventions.ServiceNameKey): "two", "environment": "environment2"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
-	newResourceWithAttrs(hostIDDims, map[string]string{conventions.AttributeServiceName: "three", "environment": "environment3"}).
+	newResourceWithAttrs(hostIDDims, map[string]string{string(conventions.ServiceNameKey): "three", "environment": "environment3"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
 	a.ProcessTraces(context.Background(), fakeTraces)
 
@@ -62,7 +62,7 @@ func TestExpiration(t *testing.T) {
 	advanceTime(a, 4)
 
 	fakeTraces = ptrace.NewTraces()
-	newResourceWithAttrs(hostIDDims, map[string]string{conventions.AttributeServiceName: "two", "environment": "environment2"}).
+	newResourceWithAttrs(hostIDDims, map[string]string{string(conventions.ServiceNameKey): "two", "environment": "environment2"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
 	a.ProcessTraces(context.Background(), fakeTraces)
 
@@ -96,6 +96,7 @@ func (c *correlationTestClient) Get(_ string, dimValue string, cb correlations.S
 		}
 	}()
 }
+
 func (c *correlationTestClient) Correlate(cl *correlations.Correlation, cb correlations.CorrelateCB) {
 	c.Lock()
 	defer c.Unlock()
@@ -103,6 +104,7 @@ func (c *correlationTestClient) Correlate(cl *correlations.Correlation, cb corre
 	cb(cl, nil)
 	atomic.AddInt64(&c.correlateCounter, 1)
 }
+
 func (c *correlationTestClient) Delete(cl *correlations.Correlation, cb correlations.SuccessfulDeleteCB) {
 	c.Lock()
 	defer c.Unlock()
@@ -110,6 +112,7 @@ func (c *correlationTestClient) Delete(cl *correlations.Correlation, cb correlat
 	cb(cl)
 	atomic.AddInt64(&c.deleteCounter, 1)
 }
+
 func (c *correlationTestClient) getCorrelations() []*correlations.Correlation {
 	c.Lock()
 	defer c.Unlock()
@@ -150,7 +153,7 @@ func TestCorrelationEmptyEnvironment(t *testing.T) {
 	a.ProcessTraces(context.Background(), fakeTraces)
 
 	cors := correlationClient.getCorrelations()
-	assert.Equal(t, 4, len(cors), "expected 4 correlations to be made")
+	assert.Len(t, cors, 4, "expected 4 correlations to be made")
 	for _, c := range cors {
 		assert.Contains(t, []string{"container_id", "kubernetes_pod_uid", "host", "AWSUniqueId"}, c.DimName)
 		assert.Contains(t, []string{"test", "randomAWSUniqueId", "testk8sPodUID", "testContainerID"}, c.DimValue)
@@ -190,11 +193,11 @@ func TestCorrelationUpdates(t *testing.T) {
 	setTime(a, time.Unix(100, 0))
 
 	fakeTraces := ptrace.NewTraces()
-	newResourceWithAttrs(containerLevelIDDims, map[string]string{conventions.AttributeServiceName: "one", "environment": "environment1"}).
+	newResourceWithAttrs(containerLevelIDDims, map[string]string{string(conventions.ServiceNameKey): "one", "environment": "environment1"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
-	newResourceWithAttrs(containerLevelIDDims, map[string]string{conventions.AttributeServiceName: "two", "environment": "environment2"}).
+	newResourceWithAttrs(containerLevelIDDims, map[string]string{string(conventions.ServiceNameKey): "two", "environment": "environment2"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
-	newResourceWithAttrs(containerLevelIDDims, map[string]string{conventions.AttributeServiceName: "three", "environment": "environment3"}).
+	newResourceWithAttrs(containerLevelIDDims, map[string]string{string(conventions.ServiceNameKey): "three", "environment": "environment3"}).
 		CopyTo(fakeTraces.ResourceSpans().AppendEmpty().Resource())
 	a.ProcessTraces(context.Background(), fakeTraces)
 
@@ -206,5 +209,5 @@ func TestCorrelationUpdates(t *testing.T) {
 	numHostIDDimCorrelations := len(hostIDDims)*(numEnvironments+numServices) + 4 /* 4 deletes for service & environment fetched at startup */
 	numContainerLevelCorrelations := 2 * len(containerLevelIDDims)
 	totalExpectedCorrelations := numHostIDDimCorrelations + numContainerLevelCorrelations
-	assert.Equal(t, totalExpectedCorrelations, len(correlationClient.getCorrelations()), "# of correlation requests do not match")
+	assert.Len(t, correlationClient.getCorrelations(), totalExpectedCorrelations, "# of correlation requests do not match")
 }

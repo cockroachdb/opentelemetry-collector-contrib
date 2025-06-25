@@ -40,6 +40,11 @@ func TestScrapeConfigsEnabled(t *testing.T) {
 	defer mockServer.Close()
 
 	optConfigs := metadata.DefaultMetricsBuilderConfig()
+	optConfigs.Metrics.VcenterHostMemoryCapacity.Enabled = true
+	optConfigs.Metrics.VcenterVMMemoryGranted.Enabled = true
+	optConfigs.Metrics.VcenterVMNetworkBroadcastPacketRate.Enabled = true
+	optConfigs.Metrics.VcenterVMNetworkMulticastPacketRate.Enabled = true
+	optConfigs.Metrics.VcenterVMCPUTime.Enabled = true
 	setResourcePoolMemoryUsageAttrFeatureGate(t, true)
 
 	cfg := &Config{
@@ -71,11 +76,11 @@ func TestScrape_TLS(t *testing.T) {
 }
 
 func testScrape(ctx context.Context, t *testing.T, cfg *Config, fileName string) {
-	scraper := newVmwareVcenterScraper(zap.NewNop(), cfg, receivertest.NewNopSettings())
+	scraper := newVmwareVcenterScraper(zap.NewNop(), cfg, receivertest.NewNopSettings(metadata.Type))
 
 	metrics, err := scraper.scrape(ctx)
 	require.NoError(t, err)
-	require.NotEqual(t, metrics.MetricCount(), 0)
+	require.NotEqual(t, 0, metrics.MetricCount())
 
 	goldenPath := filepath.Join("testdata", "metrics", fileName)
 	expectedMetrics, err := golden.ReadMetrics(goldenPath)
@@ -114,12 +119,12 @@ func TestScrape_NoClient(t *testing.T) {
 		config: &Config{
 			Endpoint: "http://vcsa.localnet",
 		},
-		mb:     metadata.NewMetricsBuilder(metadata.DefaultMetricsBuilderConfig(), receivertest.NewNopSettings()),
+		mb:     metadata.NewMetricsBuilder(metadata.DefaultMetricsBuilderConfig(), receivertest.NewNopSettings(metadata.Type)),
 		logger: zap.NewNop(),
 	}
 	metrics, err := scraper.scrape(ctx)
 	require.ErrorContains(t, err, "unable to connect to vSphere SDK")
-	require.Equal(t, metrics.MetricCount(), 0)
+	require.Equal(t, 0, metrics.MetricCount())
 	require.NoError(t, scraper.Shutdown(ctx))
 }
 
@@ -145,7 +150,7 @@ func TestStartFailures_Metrics(t *testing.T) {
 
 	ctx := context.Background()
 	for _, tc := range cases {
-		scraper := newVmwareVcenterScraper(zap.NewNop(), tc.cfg, receivertest.NewNopSettings())
+		scraper := newVmwareVcenterScraper(zap.NewNop(), tc.cfg, receivertest.NewNopSettings(metadata.Type))
 		err := scraper.Start(ctx, nil)
 		if tc.err != nil {
 			require.ErrorContains(t, err, tc.err.Error())

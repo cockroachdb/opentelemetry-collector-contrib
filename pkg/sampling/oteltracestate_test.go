@@ -4,7 +4,6 @@
 package sampling
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -51,7 +50,7 @@ func TestOpenTelemetryTraceStateTValueSerialize(t *testing.T) {
 	require.True(t, hasTv)
 	require.Equal(t, 1-0x3p-4, tv.Probability())
 
-	require.NotEqual(t, "", otts.RValue())
+	require.NotEmpty(t, otts.RValue())
 	require.Equal(t, "10000000000000", otts.RValue())
 	rv, hasRv := otts.RValueRandomness()
 	require.True(t, hasRv)
@@ -85,10 +84,10 @@ func TestOpenTelemetryTraceStateRValuePValue(t *testing.T) {
 	otts, err := NewOpenTelemetryTraceState(orig)
 	require.Error(t, err)
 	require.Equal(t, ErrRValueSize, err)
-	require.Equal(t, "", otts.RValue())
+	require.Empty(t, otts.RValue())
 
 	// The error is oblivious to the old r-value, but that's ok.
-	require.Contains(t, err.Error(), "14 hex digits")
+	require.ErrorContains(t, err, "14 hex digits")
 
 	require.Equal(t, []KV{{"p", "2"}}, otts.ExtraValues())
 
@@ -101,8 +100,8 @@ func TestOpenTelemetryTraceStateTValueUpdate(t *testing.T) {
 	const orig = "rv:abcdefabcdefab"
 	otts, err := NewOpenTelemetryTraceState(orig)
 	require.NoError(t, err)
-	require.Equal(t, "", otts.TValue())
-	require.NotEqual(t, "", otts.RValue())
+	require.Empty(t, otts.TValue())
+	require.NotEmpty(t, otts.RValue())
 
 	th, _ := TValueToThreshold("3")
 	require.NoError(t, otts.UpdateTValueWithSampling(th))
@@ -121,8 +120,8 @@ func TestOpenTelemetryTraceStateTValueUpdate(t *testing.T) {
 func TestOpenTelemetryTraceStateRTUpdate(t *testing.T) {
 	otts, err := NewOpenTelemetryTraceState("a:b")
 	require.NoError(t, err)
-	require.Equal(t, "", otts.TValue())
-	require.Equal(t, "", otts.RValue())
+	require.Empty(t, otts.TValue())
+	require.Empty(t, otts.RValue())
 	require.True(t, otts.HasAnyValue())
 
 	th, _ := TValueToThreshold("3")
@@ -233,7 +232,7 @@ func TestParseOpenTelemetryTraceState(t *testing.T) {
 			otts, err := NewOpenTelemetryTraceState(test.in)
 
 			if test.expectErr != nil {
-				require.True(t, errors.Is(err, test.expectErr), "%q: not expecting %v wanted %v", test.in, err, test.expectErr)
+				require.ErrorIs(t, err, test.expectErr, "%q: not expecting %v wanted %v", test.in, err, test.expectErr)
 			} else {
 				require.NoError(t, err)
 			}

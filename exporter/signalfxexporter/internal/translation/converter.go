@@ -49,7 +49,8 @@ func NewMetricsConverter(
 	includes []dpfilters.MetricFilter,
 	nonAlphanumericDimChars string,
 	dropHistogramBuckets bool,
-	processHistograms bool) (*MetricsConverter, error) {
+	processHistograms bool,
+) (*MetricsConverter, error) {
 	fs, err := dpfilters.NewFilterSet(excludes, includes)
 	if err != nil {
 		return nil, err
@@ -63,6 +64,12 @@ func NewMetricsConverter(
 		dropHistogramBuckets: dropHistogramBuckets,
 		processHistograms:    processHistograms,
 	}, nil
+}
+
+func (c *MetricsConverter) Start() {
+	if c.metricTranslator != nil {
+		c.metricTranslator.Start()
+	}
 }
 
 // MetricsToSignalFxV2 converts the passed in MetricsData to SFx datapoints
@@ -137,18 +144,17 @@ func resourceToDimensions(res pcommon.Resource) []*sfxpb.Dimension {
 		})
 	}
 
-	res.Attributes().Range(func(k string, val pcommon.Value) bool {
+	for k, val := range res.Attributes().All() {
 		// Never send the SignalFX token
 		if k == splunk.SFxAccessTokenLabel {
-			return true
+			continue
 		}
 
 		dims = append(dims, &sfxpb.Dimension{
 			Key:   k,
 			Value: val.AsString(),
 		})
-		return true
-	})
+	}
 
 	return dims
 }
@@ -159,6 +165,12 @@ func (c *MetricsConverter) ConvertDimension(dim string) string {
 		res = c.metricTranslator.translateDimension(dim)
 	}
 	return filterKeyChars(res, c.datapointValidator.nonAlphanumericDimChars)
+}
+
+func (c *MetricsConverter) Shutdown() {
+	if c.metricTranslator != nil {
+		c.metricTranslator.Shutdown()
+	}
 }
 
 // Values obtained from https://dev.splunk.com/observability/docs/datamodel/ingest#Criteria-for-metric-and-dimension-names-and-values
@@ -241,7 +253,7 @@ func (dpv *datapointValidator) isValidMetricName(name string) bool {
 
 func (dpv *datapointValidator) isValidNumberOfDimension(dp *sfxpb.DataPoint) bool {
 	if len(dp.Dimensions) > maxNumberOfDimensions {
-		dpv.logger.Debug("dropping datapoint",
+		dpv.logger.Warn("dropping datapoint",
 			zap.String("reason", invalidNumberOfDimensions),
 			zap.Stringer("datapoint", dp),
 			zap.Int("number_of_dimensions", len(dp.Dimensions)),

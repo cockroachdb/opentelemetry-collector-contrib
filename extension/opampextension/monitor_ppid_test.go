@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 )
 
 func TestMonitorPPID(t *testing.T) {
@@ -20,7 +20,7 @@ func TestMonitorPPID(t *testing.T) {
 		t.Parallel()
 
 		cmdContext, cmdCancel := context.WithCancel(context.Background())
-		cmd := longRunningComand(cmdContext)
+		cmd := longRunningCommand(cmdContext)
 		cmd.Stdout = os.Stdout
 		require.NoError(t, cmd.Start())
 		cmdPid := cmd.Process.Pid
@@ -30,7 +30,7 @@ func TestMonitorPPID(t *testing.T) {
 			_ = cmd.Wait()
 		})
 
-		statusReportFunc := func(se *component.StatusEvent) {
+		statusReportFunc := func(se *componentstatus.Event) {
 			t.Logf("Status event error: %s", se.Err())
 			require.FailNow(t, "status report function should not be called")
 		}
@@ -49,12 +49,12 @@ func TestMonitorPPID(t *testing.T) {
 		t.Parallel()
 
 		cmdContext, cmdCancel := context.WithCancel(context.Background())
-		cmd := longRunningComand(cmdContext)
+		cmd := longRunningCommand(cmdContext)
 		require.NoError(t, cmd.Start())
 		cmdPid := cmd.Process.Pid
 
-		var status *component.StatusEvent
-		statusReportFunc := func(evt *component.StatusEvent) {
+		var status *componentstatus.Event
+		statusReportFunc := func(evt *componentstatus.Event) {
 			if status != nil {
 				require.FailNow(t, "status report function should not be called twice")
 			}
@@ -71,7 +71,7 @@ func TestMonitorPPID(t *testing.T) {
 
 		monitorPPID(context.Background(), 1*time.Millisecond, int32(cmdPid), statusReportFunc)
 		require.NotNil(t, status)
-		require.Equal(t, component.StatusFatalError, status.Status())
+		require.Equal(t, componentstatus.StatusFatalError, status.Status())
 
 		// wait for command stop goroutine to actually finish
 		select {
@@ -79,12 +79,10 @@ func TestMonitorPPID(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("Timed out waiting for command to stop")
 		}
-
 	})
-
 }
 
-func longRunningComand(ctx context.Context) *exec.Cmd {
+func longRunningCommand(ctx context.Context) *exec.Cmd {
 	switch runtime.GOOS {
 	case "windows":
 		// Would prefer to use timeout.exe here, but it doesn't seem to work in

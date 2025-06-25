@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	sfxpb "github.com/signalfx/com_signalfx_metrics_protobuf/model"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -26,6 +27,7 @@ import (
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/errorutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/signalfx"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/signalfxreceiver/internal/metadata"
@@ -90,7 +92,7 @@ func newReceiver(
 	config Config,
 ) (*sfxReceiver, error) {
 	transport := "http"
-	if config.TLSSetting != nil {
+	if config.TLS != nil {
 		transport = "https"
 	}
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
@@ -122,13 +124,12 @@ func (r *sfxReceiver) RegisterLogsConsumer(lc consumer.Logs) {
 // By convention the consumer of the received data is set when the receiver
 // instance is created.
 func (r *sfxReceiver) Start(ctx context.Context, host component.Host) error {
-
 	if r.server != nil {
 		return nil
 	}
 
 	// set up the listener
-	ln, err := r.config.ServerConfig.ToListener(ctx)
+	ln, err := r.config.ToListener(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to bind to address %s: %w", r.config.Endpoint, err)
 	}
@@ -137,7 +138,7 @@ func (r *sfxReceiver) Start(ctx context.Context, host component.Host) error {
 	mx.HandleFunc("/v2/datapoint", r.handleDatapointReq)
 	mx.HandleFunc("/v2/event", r.handleEventReq)
 
-	r.server, err = r.config.ServerConfig.ToServer(ctx, host, r.settings.TelemetrySettings, mx)
+	r.server, err = r.config.ToServer(ctx, host, r.settings.TelemetrySettings, mx)
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,7 @@ func (r *sfxReceiver) Start(ctx context.Context, host component.Host) error {
 	go func() {
 		defer r.shutdownWG.Done()
 		if errHTTP := r.server.Serve(ln); !errors.Is(errHTTP, http.ErrServerClosed) && errHTTP != nil {
-			r.settings.TelemetrySettings.ReportStatus(component.NewFatalErrorEvent(errHTTP))
+			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(errHTTP))
 		}
 	}()
 	return nil
@@ -195,7 +196,7 @@ func (r *sfxReceiver) readBody(ctx context.Context, resp http.ResponseWriter, re
 
 func (r *sfxReceiver) writeResponse(ctx context.Context, resp http.ResponseWriter, err error) {
 	if err != nil {
-		r.failRequest(ctx, resp, http.StatusInternalServerError, errNextConsumerRespBody, err)
+		r.failRequest(ctx, resp, errorutil.GetHTTPStatusCodeFromError(err), errNextConsumerRespBody, err)
 		return
 	}
 

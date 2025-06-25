@@ -43,14 +43,14 @@ func TestMetricsBuilder(t *testing.T) {
 			expectEmpty: true,
 		},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			start := pcommon.Timestamp(1_000_000_000)
 			ts := pcommon.Timestamp(1_000_001_000)
 			observedZapCore, observedLogs := observer.New(zap.WarnLevel)
-			settings := receivertest.NewNopSettings()
+			settings := receivertest.NewNopSettings(receivertest.NopType)
 			settings.Logger = zap.New(observedZapCore)
-			mb := NewMetricsBuilder(loadMetricsBuilderConfig(t, test.name), settings, WithStartTime(start))
+			mb := NewMetricsBuilder(loadMetricsBuilderConfig(t, tt.name), settings, WithStartTime(start))
 
 			expectedWarnings := 0
 
@@ -74,7 +74,7 @@ func TestMetricsBuilder(t *testing.T) {
 			res := pcommon.NewResource()
 			metrics := mb.Emit(WithResource(res))
 
-			if test.expectEmpty {
+			if tt.expectEmpty {
 				assert.Equal(t, 0, metrics.ResourceMetrics().Len())
 				return
 			}
@@ -84,10 +84,10 @@ func TestMetricsBuilder(t *testing.T) {
 			assert.Equal(t, res, rm.Resource())
 			assert.Equal(t, 1, rm.ScopeMetrics().Len())
 			ms := rm.ScopeMetrics().At(0).Metrics()
-			if test.metricsSet == testDataSetDefault {
+			if tt.metricsSet == testDataSetDefault {
 				assert.Equal(t, defaultMetricsCount, ms.Len())
 			}
-			if test.metricsSet == testDataSetAll {
+			if tt.metricsSet == testDataSetAll {
 				assert.Equal(t, allMetricsCount, ms.Len())
 			}
 			validatedMetrics := make(map[string]bool)
@@ -107,7 +107,7 @@ func TestMetricsBuilder(t *testing.T) {
 					assert.Equal(t, int64(1), dp.IntValue())
 					attrVal, ok := dp.Attributes().Get("http.url")
 					assert.True(t, ok)
-					assert.EqualValues(t, "http.url-val", attrVal.Str())
+					assert.Equal(t, "http.url-val", attrVal.Str())
 				case "httpcheck.error":
 					assert.False(t, validatedMetrics["httpcheck.error"], "Found a duplicate in the metrics slice: httpcheck.error")
 					validatedMetrics["httpcheck.error"] = true
@@ -115,7 +115,7 @@ func TestMetricsBuilder(t *testing.T) {
 					assert.Equal(t, 1, ms.At(i).Sum().DataPoints().Len())
 					assert.Equal(t, "Records errors occurring during HTTP check.", ms.At(i).Description())
 					assert.Equal(t, "{error}", ms.At(i).Unit())
-					assert.Equal(t, false, ms.At(i).Sum().IsMonotonic())
+					assert.False(t, ms.At(i).Sum().IsMonotonic())
 					assert.Equal(t, pmetric.AggregationTemporalityCumulative, ms.At(i).Sum().AggregationTemporality())
 					dp := ms.At(i).Sum().DataPoints().At(0)
 					assert.Equal(t, start, dp.StartTimestamp())
@@ -124,10 +124,10 @@ func TestMetricsBuilder(t *testing.T) {
 					assert.Equal(t, int64(1), dp.IntValue())
 					attrVal, ok := dp.Attributes().Get("http.url")
 					assert.True(t, ok)
-					assert.EqualValues(t, "http.url-val", attrVal.Str())
+					assert.Equal(t, "http.url-val", attrVal.Str())
 					attrVal, ok = dp.Attributes().Get("error.message")
 					assert.True(t, ok)
-					assert.EqualValues(t, "error.message-val", attrVal.Str())
+					assert.Equal(t, "error.message-val", attrVal.Str())
 				case "httpcheck.status":
 					assert.False(t, validatedMetrics["httpcheck.status"], "Found a duplicate in the metrics slice: httpcheck.status")
 					validatedMetrics["httpcheck.status"] = true
@@ -135,7 +135,7 @@ func TestMetricsBuilder(t *testing.T) {
 					assert.Equal(t, 1, ms.At(i).Sum().DataPoints().Len())
 					assert.Equal(t, "1 if the check resulted in status_code matching the status_class, otherwise 0.", ms.At(i).Description())
 					assert.Equal(t, "1", ms.At(i).Unit())
-					assert.Equal(t, false, ms.At(i).Sum().IsMonotonic())
+					assert.False(t, ms.At(i).Sum().IsMonotonic())
 					assert.Equal(t, pmetric.AggregationTemporalityCumulative, ms.At(i).Sum().AggregationTemporality())
 					dp := ms.At(i).Sum().DataPoints().At(0)
 					assert.Equal(t, start, dp.StartTimestamp())
@@ -144,16 +144,16 @@ func TestMetricsBuilder(t *testing.T) {
 					assert.Equal(t, int64(1), dp.IntValue())
 					attrVal, ok := dp.Attributes().Get("http.url")
 					assert.True(t, ok)
-					assert.EqualValues(t, "http.url-val", attrVal.Str())
+					assert.Equal(t, "http.url-val", attrVal.Str())
 					attrVal, ok = dp.Attributes().Get("http.status_code")
 					assert.True(t, ok)
 					assert.EqualValues(t, 16, attrVal.Int())
 					attrVal, ok = dp.Attributes().Get("http.method")
 					assert.True(t, ok)
-					assert.EqualValues(t, "http.method-val", attrVal.Str())
+					assert.Equal(t, "http.method-val", attrVal.Str())
 					attrVal, ok = dp.Attributes().Get("http.status_class")
 					assert.True(t, ok)
-					assert.EqualValues(t, "http.status_class-val", attrVal.Str())
+					assert.Equal(t, "http.status_class-val", attrVal.Str())
 				}
 			}
 		})

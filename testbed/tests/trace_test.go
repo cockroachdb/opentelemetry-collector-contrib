@@ -17,10 +17,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/ptrace"
-	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
+	conventions "go.opentelemetry.io/otel/semconv/v1.6.1"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/idutils"
+	idutils "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/core/xidutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/datareceivers"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/datasenders"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/testbed"
@@ -130,10 +130,13 @@ func TestTrace10kSPS(t *testing.T) {
 		},
 	}
 
-	processors := map[string]string{
-		"batch": `
+	processors := []ProcessorNameAndConfigBody{
+		{
+			Name: "batch",
+			Body: `
   batch:
 `,
+		},
 	}
 
 	for _, test := range tests {
@@ -145,6 +148,7 @@ func TestTrace10kSPS(t *testing.T) {
 				test.resourceSpec,
 				performanceResultsSummary,
 				processors,
+				nil,
 				nil,
 			)
 		})
@@ -164,28 +168,33 @@ func TestTrace10kSPSJaegerGRPC(t *testing.T) {
 			ExpectedMaxRAM: 100,
 		},
 		performanceResultsSummary,
-		map[string]string{
-			"batch": `
+		[]ProcessorNameAndConfigBody{
+			{
+				Name: "batch",
+				Body: `
   batch:
 `,
+			},
 		},
 		nil,
 	)
 }
 
 func TestTraceNoBackend10kSPS(t *testing.T) {
-
-	limitProcessors := map[string]string{
-		"memory_limiter": `
+	limitProcessors := []ProcessorNameAndConfigBody{
+		{
+			Name: "memory_limiter",
+			Body: `
   memory_limiter:
    check_interval: 100ms
    limit_mib: 20
 `,
+		},
 	}
 
-	noLimitProcessors := map[string]string{}
+	noLimitProcessors := []ProcessorNameAndConfigBody{}
 
-	var processorsConfig = []processorConfig{
+	processorsConfig := []processorConfig{
 		{
 			Name:                "NoMemoryLimit",
 			Processor:           noLimitProcessors,
@@ -256,105 +265,6 @@ func TestTrace1kSPSWithAttrs(t *testing.T) {
 	}, nil, nil)
 }
 
-func TestTraceBallast1kSPSWithAttrs(t *testing.T) {
-	ballastExtCfg := `
-  memory_ballast:
-    size_mib: 1000`
-	Scenario1kSPSWithAttrs(t, []string{}, []TestCase{
-		// No attributes.
-		{
-			attrCount:      0,
-			attrSizeByte:   0,
-			expectedMaxCPU: 53,
-			expectedMaxRAM: 2200,
-			resultsSummary: performanceResultsSummary,
-		},
-		{
-			attrCount:      100,
-			attrSizeByte:   50,
-			expectedMaxCPU: 100,
-			expectedMaxRAM: 2200,
-			resultsSummary: performanceResultsSummary,
-		},
-		{
-			attrCount:      10,
-			attrSizeByte:   1000,
-			expectedMaxCPU: 100,
-			expectedMaxRAM: 2200,
-			resultsSummary: performanceResultsSummary,
-		},
-		{
-			attrCount:      20,
-			attrSizeByte:   5000,
-			expectedMaxCPU: 120,
-			expectedMaxRAM: 2200,
-			resultsSummary: performanceResultsSummary,
-		},
-	}, nil, map[string]string{"memory_ballast": ballastExtCfg})
-}
-
-func TestTraceBallast1kSPSAddAttrs(t *testing.T) {
-	ballastExtCfg := `
-  memory_ballast:
-    size_mib: 1000`
-
-	attrProcCfg := `
-  attributes:
-    actions:
-      - key: attrib.key00
-        value: 123
-        action: insert
-      - key: attrib.key01
-        value: "a small string for this attribute"
-        action: insert
-      - key: attrib.key02
-        value: true
-        action: insert
-      - key: region
-        value: test-region
-        action: insert
-      - key: data-center
-        value: test-datacenter
-        action: insert`
-
-	Scenario1kSPSWithAttrs(
-		t,
-		[]string{},
-		[]TestCase{
-			{
-				attrCount:      0,
-				attrSizeByte:   0,
-				expectedMaxCPU: 60,
-				expectedMaxRAM: 2200,
-				resultsSummary: performanceResultsSummary,
-			},
-			{
-				attrCount:      100,
-				attrSizeByte:   50,
-				expectedMaxCPU: 80,
-				expectedMaxRAM: 2200,
-				resultsSummary: performanceResultsSummary,
-			},
-			{
-				attrCount:      10,
-				attrSizeByte:   1000,
-				expectedMaxCPU: 80,
-				expectedMaxRAM: 2200,
-				resultsSummary: performanceResultsSummary,
-			},
-			{
-				attrCount:      20,
-				attrSizeByte:   5000,
-				expectedMaxCPU: 120,
-				expectedMaxRAM: 2200,
-				resultsSummary: performanceResultsSummary,
-			},
-		},
-		map[string]string{"attributes": attrProcCfg},
-		map[string]string{"memory_ballast": ballastExtCfg},
-	)
-}
-
 // verifySingleSpan sends a single span to Collector, waits until the span is forwarded
 // and received by MockBackend and calls user-supplied verification functions on
 // received span.
@@ -367,7 +277,6 @@ func verifySingleSpan(
 	spanName string,
 	verifyReceived func(span ptrace.Span),
 ) {
-
 	// Clear previously received traces.
 	tc.MockBackend.ClearReceivedItems()
 	startCounter := tc.MockBackend.DataItemsReceived()
@@ -375,7 +284,7 @@ func verifySingleSpan(
 	// Send one span.
 	td := ptrace.NewTraces()
 	rs := td.ResourceSpans().AppendEmpty()
-	rs.Resource().Attributes().PutStr(conventions.AttributeServiceName, serviceName)
+	rs.Resource().Attributes().PutStr(string(conventions.ServiceNameKey), serviceName)
 	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
 	span.SetTraceID(idutils.UInt64ToTraceID(0, 1))
 	span.SetSpanID(idutils.UInt64ToSpanID(1))
@@ -407,7 +316,7 @@ func verifySingleSpan(
 			}
 		}
 	}
-	assert.EqualValues(t, 1, count, "must receive one span")
+	assert.Equal(t, 1, count, "must receive one span")
 }
 
 func TestTraceAttributesProcessor(t *testing.T) {
@@ -429,11 +338,16 @@ func TestTraceAttributesProcessor(t *testing.T) {
 			require.NoError(t, err)
 
 			// Use processor to add attributes to certain spans.
-			processors := map[string]string{
-				"batch": `
+			processors := []ProcessorNameAndConfigBody{
+				{
+					Name: "batch",
+					Body: `
   batch:
 `,
-				"attributes": `
+				},
+				{
+					Name: "attributes",
+					Body: `
   attributes:
     include:
       match_type: regexp
@@ -444,11 +358,12 @@ func TestTraceAttributesProcessor(t *testing.T) {
         key: "new_attr"
         value: "string value"
 `,
+				},
 			}
 
 			agentProc := testbed.NewChildProcessCollector(testbed.WithEnvVar("GOMAXPROCS", "2"))
 			configStr := createConfigYaml(t, test.sender, test.receiver, resultDir, processors, nil)
-			configCleanup, err := agentProc.PrepareConfig(configStr)
+			configCleanup, err := agentProc.PrepareConfig(t, configStr)
 			require.NoError(t, err)
 			defer configCleanup()
 
@@ -481,10 +396,10 @@ func TestTraceAttributesProcessor(t *testing.T) {
 			// verifySpan verifies that attributes was added to the internal data span.
 			verifySpan := func(span ptrace.Span) {
 				require.NotNil(t, span)
-				require.Equal(t, span.Attributes().Len(), 1)
+				require.Equal(t, 1, span.Attributes().Len())
 				attrVal, ok := span.Attributes().Get("new_attr")
 				assert.True(t, ok)
-				assert.EqualValues(t, "string value", attrVal.Str())
+				assert.Equal(t, "string value", attrVal.Str())
 			}
 
 			verifySingleSpan(t, tc, nodeToInclude, spanToInclude, verifySpan)
@@ -494,14 +409,14 @@ func TestTraceAttributesProcessor(t *testing.T) {
 
 			verifySingleSpan(t, tc, nodeToExclude, spanToInclude, func(span ptrace.Span) {
 				// Verify attributes was not added to the new internal data span.
-				assert.Equal(t, span.Attributes().Len(), 0)
+				assert.Equal(t, 0, span.Attributes().Len())
 			})
 
 			// Create another span that does not match "include" filter.
 			spanToExclude := "span-not-to-add-attr"
 			verifySingleSpan(t, tc, nodeToInclude, spanToExclude, func(span ptrace.Span) {
 				// Verify attributes was not added to the new internal data span.
-				assert.Equal(t, span.Attributes().Len(), 0)
+				assert.Equal(t, 0, span.Attributes().Len())
 			})
 		})
 	}
@@ -515,11 +430,16 @@ func TestTraceAttributesProcessorJaegerGRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use processor to add attributes to certain spans.
-	processors := map[string]string{
-		"batch": `
+	processors := []ProcessorNameAndConfigBody{
+		{
+			Name: "batch",
+			Body: `
   batch:
 `,
-		"attributes": `
+		},
+		{
+			Name: "attributes",
+			Body: `
   attributes:
     include:
       match_type: regexp
@@ -530,11 +450,12 @@ func TestTraceAttributesProcessorJaegerGRPC(t *testing.T) {
         key: "new_attr"
         value: "string value"
 `,
+		},
 	}
 
 	agentProc := testbed.NewChildProcessCollector(testbed.WithEnvVar("GOMAXPROCS", "2"))
 	configStr := createConfigYaml(t, sender, receiver, resultDir, processors, nil)
-	configCleanup, err := agentProc.PrepareConfig(configStr)
+	configCleanup, err := agentProc.PrepareConfig(t, configStr)
 	require.NoError(t, err)
 	defer configCleanup()
 
@@ -569,10 +490,10 @@ func TestTraceAttributesProcessorJaegerGRPC(t *testing.T) {
 	// verifySpan verifies that attributes was added to the internal data span.
 	verifySpan := func(span ptrace.Span) {
 		require.NotNil(t, span)
-		require.Equal(t, span.Attributes().Len(), 1)
+		require.Equal(t, 1, span.Attributes().Len())
 		attrVal, ok := span.Attributes().Get("new_attr")
 		assert.True(t, ok)
-		assert.EqualValues(t, "string value", attrVal.Str())
+		assert.Equal(t, "string value", attrVal.Str())
 	}
 
 	verifySingleSpan(t, tc, nodeToInclude, spanToInclude, verifySpan)
@@ -582,13 +503,13 @@ func TestTraceAttributesProcessorJaegerGRPC(t *testing.T) {
 
 	verifySingleSpan(t, tc, nodeToExclude, spanToInclude, func(span ptrace.Span) {
 		// Verify attributes was not added to the new internal data span.
-		assert.Equal(t, span.Attributes().Len(), 0)
+		assert.Equal(t, 0, span.Attributes().Len())
 	})
 
 	// Create another span that does not match "include" filter.
 	spanToExclude := "span-not-to-add-attr"
 	verifySingleSpan(t, tc, nodeToInclude, spanToExclude, func(span ptrace.Span) {
 		// Verify attributes was not added to the new internal data span.
-		assert.Equal(t, span.Attributes().Len(), 0)
+		assert.Equal(t, 0, span.Attributes().Len())
 	})
 }

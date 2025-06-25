@@ -4,12 +4,14 @@
 package udp
 
 import (
-	"math/rand"
+	"fmt"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -29,7 +31,7 @@ func udpInputTest(input []byte, expected []string, cfg *Config) func(t *testing.
 		udpInput, ok := op.(*Input)
 		require.True(t, ok)
 
-		udpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		udpInput.OutputOperators = []operator.Operator{&mockOutput}
 
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -60,7 +62,7 @@ func udpInputTest(input []byte, expected []string, cfg *Config) func(t *testing.
 
 		select {
 		case entry := <-entryChan:
-			require.FailNow(t, "Unexpected entry: %s", entry)
+			require.FailNow(t, fmt.Sprintf("Unexpected entry: %s", entry))
 		case <-time.After(100 * time.Millisecond):
 			return
 		}
@@ -81,7 +83,7 @@ func udpInputAttributesTest(input []byte, expected []string) func(t *testing.T) 
 		udpInput, ok := op.(*Input)
 		require.True(t, ok)
 
-		udpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		udpInput.OutputOperators = []operator.Operator{&mockOutput}
 
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -130,7 +132,7 @@ func udpInputAttributesTest(input []byte, expected []string) func(t *testing.T) 
 
 		select {
 		case entry := <-entryChan:
-			require.FailNow(t, "Unexpected entry: %s", entry)
+			require.FailNow(t, fmt.Sprintf("Unexpected entry: %s", entry))
 		case <-time.After(100 * time.Millisecond):
 			return
 		}
@@ -167,7 +169,7 @@ func TestFailToBind(t *testing.T) {
 	minPort := 30000
 	maxPort := 40000
 	for i := 1; 1 < 10; i++ {
-		port = minPort + rand.Intn(maxPort-minPort+1)
+		port = minPort + rand.IntN(maxPort-minPort+1)
 		_, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(port)), time.Second*2)
 		if err != nil {
 			// a failed connection indicates that the port is available for use
@@ -178,7 +180,7 @@ func TestFailToBind(t *testing.T) {
 		t.Errorf("failed to find a free port between %d and %d", minPort, maxPort)
 	}
 
-	var startUDP = func(int) (*Input, error) {
+	startUDP := func(int) (*Input, error) {
 		cfg := NewConfigWithID("test_input")
 		cfg.ListenAddress = net.JoinHostPort(ip, strconv.Itoa(port))
 
@@ -190,7 +192,7 @@ func TestFailToBind(t *testing.T) {
 		udpInput, ok := op.(*Input)
 		require.True(t, ok)
 
-		udpInput.InputOperator.OutputOperators = []operator.Operator{&mockOutput}
+		udpInput.OutputOperators = []operator.Operator{&mockOutput}
 
 		entryChan := make(chan *entry.Entry, 1)
 		mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -221,7 +223,7 @@ func BenchmarkUDPInput(b *testing.B) {
 
 	fakeOutput := testutil.NewFakeOutput(b)
 	udpInput := op.(*Input)
-	udpInput.InputOperator.OutputOperators = []operator.Operator{fakeOutput}
+	udpInput.OutputOperators = []operator.Operator{fakeOutput}
 
 	err = udpInput.Start(testutil.NewUnscopedMockPersister())
 	require.NoError(b, err)
@@ -229,9 +231,9 @@ func BenchmarkUDPInput(b *testing.B) {
 	done := make(chan struct{})
 	go func() {
 		conn, err := net.Dial("udp", udpInput.connection.LocalAddr().String())
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		defer func() {
-			require.NoError(b, udpInput.Stop())
+			assert.NoError(b, udpInput.Stop())
 		}()
 		defer conn.Close()
 		message := []byte("message\n")
@@ -241,7 +243,7 @@ func BenchmarkUDPInput(b *testing.B) {
 				return
 			default:
 				_, err := conn.Write(message)
-				require.NoError(b, err)
+				assert.NoError(b, err)
 			}
 		}
 	}()

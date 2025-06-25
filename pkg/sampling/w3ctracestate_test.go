@@ -4,7 +4,6 @@
 package sampling
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -116,7 +115,7 @@ func TestParseW3CTraceState(t *testing.T) {
 			w3c, err := NewW3CTraceState(test.in)
 
 			if test.expectErr != nil {
-				require.True(t, errors.Is(err, test.expectErr),
+				require.ErrorIs(t, err, test.expectErr,
 					"%q: not expecting %v wanted %v", test.in, err, test.expectErr,
 				)
 			} else {
@@ -127,15 +126,15 @@ func TestParseW3CTraceState(t *testing.T) {
 				require.True(t, w3c.HasAnyValue())
 				require.Equal(t, test.rval, w3c.OTelValue().RValue())
 			} else {
-				require.Equal(t, "", w3c.OTelValue().RValue())
+				require.Empty(t, w3c.OTelValue().RValue())
 			}
 			if test.tval != ns {
 				require.True(t, w3c.OTelValue().HasAnyValue())
 				require.True(t, w3c.HasAnyValue())
-				require.NotEqual(t, "", w3c.OTelValue().TValue())
+				require.NotEmpty(t, w3c.OTelValue().TValue())
 				require.Equal(t, test.tval, w3c.OTelValue().TValue())
 			} else {
-				require.Equal(t, "", w3c.OTelValue().TValue())
+				require.Empty(t, w3c.OTelValue().TValue())
 			}
 			if test.extra != nil {
 				require.True(t, w3c.HasAnyValue())

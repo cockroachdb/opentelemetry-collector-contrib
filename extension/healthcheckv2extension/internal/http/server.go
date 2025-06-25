@@ -9,17 +9,19 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/confmap"
-	"go.opentelemetry.io/collector/extension"
+	"go.opentelemetry.io/collector/extension/extensioncapabilities"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckv2extension/internal/common"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckv2extension/internal/status"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/status"
 )
 
 type Server struct {
@@ -31,11 +33,13 @@ type Server struct {
 	colconf        atomic.Value
 	aggregator     *status.Aggregator
 	startTimestamp time.Time
-	doneCh         chan struct{}
+	doneWg         sync.WaitGroup
 }
 
-var _ component.Component = (*Server)(nil)
-var _ extension.ConfigWatcher = (*Server)(nil)
+var (
+	_ component.Component                 = (*Server)(nil)
+	_ extensioncapabilities.ConfigWatcher = (*Server)(nil)
+)
 
 func NewServer(
 	config *Config,
@@ -49,7 +53,6 @@ func NewServer(
 		telemetry:  telemetry,
 		mux:        http.NewServeMux(),
 		aggregator: aggregator,
-		doneCh:     make(chan struct{}),
 	}
 
 	if legacyConfig.UseV2 {
@@ -93,10 +96,12 @@ func (s *Server) Start(ctx context.Context, host component.Host) error {
 		return fmt.Errorf("failed to bind to address %s: %w", s.httpConfig.Endpoint, err)
 	}
 
+	s.doneWg.Add(1)
 	go func() {
-		defer close(s.doneCh)
+		defer s.doneWg.Done()
+
 		if err = s.httpServer.Serve(ln); !errors.Is(err, http.ErrServerClosed) && err != nil {
-			s.telemetry.ReportStatus(component.NewPermanentErrorEvent(err))
+			componentstatus.ReportStatus(host, componentstatus.NewPermanentErrorEvent(err))
 		}
 	}()
 
@@ -109,7 +114,7 @@ func (s *Server) Shutdown(context.Context) error {
 		return nil
 	}
 	s.httpServer.Close()
-	<-s.doneCh
+	s.doneWg.Wait()
 	return nil
 }
 

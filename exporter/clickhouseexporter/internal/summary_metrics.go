@@ -6,19 +6,19 @@ package internal // import "github.com/open-telemetry/opentelemetry-collector-co
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	conventions "go.opentelemetry.io/collector/semconv/v1.18.0"
 	"go.uber.org/zap"
 )
 
 const (
 	// language=ClickHouse SQL
 	createSummaryTableSQL = `
-CREATE TABLE IF NOT EXISTS %s_summary %s (
+CREATE TABLE IF NOT EXISTS %s %s (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
     ResourceSchemaUrl String CODEC(ZSTD(1)),
     ScopeName String CODEC(ZSTD(1)),
@@ -53,7 +53,7 @@ ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
 `
 	// language=ClickHouse SQL
-	insertSummaryTableSQL = `INSERT INTO %s_summary (
+	insertSummaryTableSQL = `INSERT INTO %s (
 	ResourceAttributes,
     ResourceSchemaUrl,
     ScopeName,
@@ -103,28 +103,27 @@ func (s *summaryMetrics) insert(ctx context.Context, db *sql.DB) error {
 			_ = statement.Close()
 		}()
 		for _, model := range s.summaryModel {
-			var serviceName string
-			if v, ok := model.metadata.ResAttr[conventions.AttributeServiceName]; ok {
-				serviceName = v
-			}
+			resAttr := AttributesToMap(model.metadata.ResAttr)
+			scopeAttr := AttributesToMap(model.metadata.ScopeInstr.Attributes())
+			serviceName := GetServiceName(model.metadata.ResAttr)
 
 			for i := 0; i < model.summary.DataPoints().Len(); i++ {
 				dp := model.summary.DataPoints().At(i)
 				quantiles, values := convertValueAtQuantile(dp.QuantileValues())
 
 				_, err = statement.ExecContext(ctx,
-					model.metadata.ResAttr,
+					resAttr,
 					model.metadata.ResURL,
 					model.metadata.ScopeInstr.Name(),
 					model.metadata.ScopeInstr.Version(),
-					attributesToMap(model.metadata.ScopeInstr.Attributes()),
+					scopeAttr,
 					model.metadata.ScopeInstr.DroppedAttributesCount(),
 					model.metadata.ScopeURL,
 					serviceName,
 					model.metricName,
 					model.metricDescription,
 					model.metricUnit,
-					attributesToMap(dp.Attributes()),
+					AttributesToMap(dp.Attributes()),
 					dp.StartTimestamp().AsTime(),
 					dp.Timestamp().AsTime(),
 					dp.Count(),
@@ -153,10 +152,10 @@ func (s *summaryMetrics) insert(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func (s *summaryMetrics) Add(resAttr map[string]string, resURL string, scopeInstr pcommon.InstrumentationScope, scopeURL string, metrics any, name string, description string, unit string) error {
+func (s *summaryMetrics) Add(resAttr pcommon.Map, resURL string, scopeInstr pcommon.InstrumentationScope, scopeURL string, metrics any, name string, description string, unit string) error {
 	summary, ok := metrics.(pmetric.Summary)
 	if !ok {
-		return fmt.Errorf("metrics param is not type of Summary")
+		return errors.New("metrics param is not type of Summary")
 	}
 	s.count += summary.DataPoints().Len()
 	s.summaryModel = append(s.summaryModel, &summaryModel{

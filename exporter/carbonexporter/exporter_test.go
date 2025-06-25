@@ -24,15 +24,16 @@ import (
 	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	conventions "go.opentelemetry.io/collector/semconv/v1.9.0"
+	conventions "go.opentelemetry.io/otel/semconv/v1.27.0"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/carbonexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/resourcetotelemetry"
 )
 
 func TestNewWithDefaultConfig(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
-	got, err := newCarbonExporter(context.Background(), cfg, exportertest.NewNopSettings())
+	got, err := newCarbonExporter(context.Background(), cfg, exportertest.NewNopSettings(metadata.Type))
 	assert.NotNil(t, got)
 	assert.NoError(t, err)
 }
@@ -42,9 +43,9 @@ func TestConsumeMetricsNoServer(t *testing.T) {
 		context.Background(),
 		&Config{
 			TCPAddrConfig:   confignet.TCPAddrConfig{Endpoint: testutil.GetAvailableLocalAddress(t)},
-			TimeoutSettings: exporterhelper.TimeoutSettings{Timeout: 5 * time.Second},
+			TimeoutSettings: exporterhelper.TimeoutConfig{Timeout: 5 * time.Second},
 		},
-		exportertest.NewNopSettings())
+		exportertest.NewNopSettings(metadata.Type))
 	require.NoError(t, err)
 	require.NoError(t, exp.Start(context.Background(), componenttest.NewNopHost()))
 	require.Error(t, exp.ConsumeMetrics(context.Background(), generateSmallBatch()))
@@ -62,10 +63,10 @@ func TestConsumeMetricsWithResourceToTelemetry(t *testing.T) {
 		context.Background(),
 		&Config{
 			TCPAddrConfig:             confignet.TCPAddrConfig{Endpoint: addr},
-			TimeoutSettings:           exporterhelper.TimeoutSettings{Timeout: 5 * time.Second},
+			TimeoutSettings:           exporterhelper.TimeoutConfig{Timeout: 5 * time.Second},
 			ResourceToTelemetryConfig: resourcetotelemetry.Settings{Enabled: true},
 		},
-		exportertest.NewNopSettings())
+		exportertest.NewNopSettings(metadata.Type))
 	require.NoError(t, err)
 	require.NoError(t, exp.Start(context.Background(), componenttest.NewNopHost()))
 	require.NoError(t, exp.ConsumeMetrics(context.Background(), generateSmallBatch()))
@@ -128,9 +129,9 @@ func TestConsumeMetrics(t *testing.T) {
 				&Config{
 					TCPAddrConfig:   confignet.TCPAddrConfig{Endpoint: addr},
 					MaxIdleConns:    tt.numProducers,
-					TimeoutSettings: exporterhelper.TimeoutSettings{Timeout: 5 * time.Second},
+					TimeoutSettings: exporterhelper.TimeoutConfig{Timeout: 5 * time.Second},
 				},
-				exportertest.NewNopSettings())
+				exportertest.NewNopSettings(metadata.Type))
 			require.NoError(t, err)
 			require.NoError(t, exp.Start(context.Background(), componenttest.NewNopHost()))
 
@@ -142,7 +143,7 @@ func TestConsumeMetrics(t *testing.T) {
 					defer writersWG.Done()
 					<-startCh
 					for j := 0; j < tt.writesPerProducer; j++ {
-						require.NoError(t, exp.ConsumeMetrics(context.Background(), tt.md))
+						assert.NoError(t, exp.ConsumeMetrics(context.Background(), tt.md))
 					}
 				}()
 			}
@@ -247,7 +248,6 @@ func TestConnPoolWithIdleMaxConnections(t *testing.T) {
 		if i != 0 {
 			assert.NotSame(t, conn, conns[i-1])
 		}
-
 	}
 	for _, conn := range conns {
 		cp.put(conn)
@@ -287,7 +287,7 @@ func generateMetricsBatch(size int) pmetric.Metrics {
 	ts := time.Now()
 	metrics := pmetric.NewMetrics()
 	rm := metrics.ResourceMetrics().AppendEmpty()
-	rm.Resource().Attributes().PutStr(conventions.AttributeServiceName, "carbon")
+	rm.Resource().Attributes().PutStr(string(conventions.ServiceNameKey), "carbon")
 	ms := rm.ScopeMetrics().AppendEmpty().Metrics()
 
 	for i := 0; i < size; i++ {
@@ -332,10 +332,10 @@ func (cs *carbonServer) start(t *testing.T, numExpectedReq int) {
 				// Close is expected to cause error.
 				return
 			}
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			go func(conn net.Conn) {
 				defer func() {
-					require.NoError(t, conn.Close())
+					assert.NoError(t, conn.Close())
 				}()
 
 				reader := bufio.NewReader(conn)
@@ -344,7 +344,7 @@ func (cs *carbonServer) start(t *testing.T, numExpectedReq int) {
 					if errors.Is(err, io.EOF) {
 						return
 					}
-					require.NoError(t, err)
+					assert.NoError(t, err)
 
 					if cs.expectedContainsValue != "" {
 						assert.Contains(t, string(buf), cs.expectedContainsValue)

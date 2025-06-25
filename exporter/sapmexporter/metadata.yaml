@@ -3,7 +3,11 @@ type: sapm
 status:
   class: exporter
   stability:
-    beta: [traces]
+    deprecated: [traces]
+  deprecation:
+    traces:
+      migration: "use OTLP exporter"
+      date: "2024-12-19"
   distributions: [contrib]
   codeowners:
     active: [dmitryax, atoulme]
@@ -11,8 +15,3 @@ status:
 
 tests:
   expect_consumer_error: true
-  goleak:
-    ignore:
-      top:
-        # See https://github.com/census-instrumentation/opencensus-go/issues/1191 for more information.
-        - "go.opencensus.io/stats/view.(*worker).start"

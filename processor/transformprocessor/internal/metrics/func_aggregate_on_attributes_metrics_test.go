@@ -4,7 +4,7 @@
 package metrics
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +34,7 @@ func Test_aggregateOnAttributes(t *testing.T) {
 			t:          aggregateutil.Sum,
 			attributes: attr,
 			want:       nil,
-			wantErr:    fmt.Errorf("aggregate_on_attributes does not support aggregating Summary metrics"),
+			wantErr:    errors.New("aggregate_on_attributes does not support aggregating Summary metrics"),
 		},
 		{
 			name:  "non-matching attribute",
@@ -316,7 +316,7 @@ func Test_aggregateOnAttributes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			evaluate, err := AggregateOnAttributes(tt.t, tt.attributes)
-			require.Nil(t, err)
+			require.NoError(t, err)
 
 			_, err = evaluate(nil, ottlmetric.NewTransformContext(tt.input, pmetric.NewMetricSlice(), pcommon.NewInstrumentationScope(), pcommon.NewResource(), pmetric.NewScopeMetrics(), pmetric.NewResourceMetrics()))
 			assert.Equal(t, tt.wantErr, err)
@@ -336,7 +336,7 @@ func Test_aggregateOnAttributes(t *testing.T) {
 				sl2 := actualMetrics.ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics()
 				actualMetric.CopyTo(sl2)
 
-				require.Nil(t, pmetrictest.CompareMetrics(expectedMetrics, actualMetrics, pmetrictest.IgnoreMetricDataPointsOrder()))
+				require.NoError(t, pmetrictest.CompareMetrics(expectedMetrics, actualMetrics, pmetrictest.IgnoreMetricDataPointsOrder()))
 			}
 		})
 	}

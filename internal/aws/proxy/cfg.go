@@ -7,7 +7,7 @@ import (
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/localhostgate"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 )
 
 // Config is the configuration for the local TCP proxy server.
@@ -21,9 +21,9 @@ type Config struct {
 	// forwards HTTP requests to AWS X-Ray backend through.
 	ProxyAddress string `mapstructure:"proxy_address"`
 
-	// TLSSetting struct exposes TLS client configuration when forwarding
+	// TLS struct exposes TLS client configuration when forwarding
 	// calls to the AWS X-Ray backend.
-	TLSSetting configtls.ClientConfig `mapstructure:"tls,omitempty"`
+	TLS configtls.ClientConfig `mapstructure:"tls,omitempty"`
 
 	// Region is the AWS region the local TCP server forwards requests to.
 	Region string `mapstructure:"region"`
@@ -49,10 +49,10 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		TCPAddrConfig: confignet.TCPAddrConfig{
-			Endpoint: localhostgate.EndpointForPort(2000),
+			Endpoint: testutil.EndpointForPort(2000),
 		},
 		ProxyAddress: "",
-		TLSSetting: configtls.ClientConfig{
+		TLS: configtls.ClientConfig{
 			Insecure:   false,
 			ServerName: "",
 		},

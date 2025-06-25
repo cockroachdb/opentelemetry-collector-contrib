@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 )
 
 func strPtr(s string) *string       { return &s }
@@ -30,7 +31,6 @@ func testPointsToDatadogPoints(points []testPoint) [][]*float64 {
 		datadogPoints[i] = []*float64{float64Ptr(float64(point.Ts)), float64Ptr(point.Value)}
 	}
 	return datadogPoints
-
 }
 
 func TestHandleMetricsPayloadV2(t *testing.T) {
@@ -83,9 +83,9 @@ func TestHandleMetricsPayloadV2(t *testing.T) {
 			series, err := mt.HandleSeriesV2Payload(req)
 			require.NoError(t, err)
 			require.NoError(t, err, "Failed to parse metrics payload")
-			require.Equal(t, tt.expectedSeriesCount, len(series))
+			require.Len(t, series, tt.expectedSeriesCount)
 			for i, s := range series {
-				require.Equal(t, tt.expectedPointsCounts[i], len(s.Points))
+				require.Len(t, s.Points, tt.expectedPointsCounts[i])
 			}
 		})
 	}
@@ -401,20 +401,20 @@ func TestTranslateSeriesV2(t *testing.T) {
 				requireMetricAndDataPointCounts(t, result, 1, 0)
 
 				require.Equal(t, 1, result.ResourceMetrics().Len())
-				v, exists := result.ResourceMetrics().At(0).Resource().Attributes().Get("host.name")
+				v, exists := result.ResourceMetrics().At(0).Resource().Attributes().Get(string(semconv.HostNameKey))
 				require.True(t, exists)
 				require.Equal(t, "Host1", v.AsString())
-				v, exists = result.ResourceMetrics().At(0).Resource().Attributes().Get("deployment.environment")
+				v, exists = result.ResourceMetrics().At(0).Resource().Attributes().Get(string(semconv.DeploymentEnvironmentNameKey))
 				require.True(t, exists)
 				require.Equal(t, "tag1", v.AsString())
-				v, exists = result.ResourceMetrics().At(0).Resource().Attributes().Get("service.version")
+				v, exists = result.ResourceMetrics().At(0).Resource().Attributes().Get(string(semconv.ServiceVersionKey))
 				require.True(t, exists)
 				require.Equal(t, "tag2", v.AsString())
 
 				require.Equal(t, 1, result.ResourceMetrics().At(0).ScopeMetrics().Len())
 				require.Equal(t, 1, result.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().Len())
 
-				require.Equal(t, "otelcol/datadogreceiver", result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Name())
+				require.Equal(t, "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver/internal/translator", result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Name())
 				require.Equal(t, component.NewDefaultBuildInfo().Version, result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Version())
 
 				metric := result.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0)

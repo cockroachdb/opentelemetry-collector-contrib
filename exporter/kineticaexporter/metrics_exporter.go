@@ -5,6 +5,7 @@ package kineticaexporter // import "github.com/open-telemetry/opentelemetry-coll
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -40,15 +41,15 @@ type kineticaSumRecord struct {
 }
 
 type kineticaHistogramRecord struct {
-	histogram                  *Histogram
-	histogramResourceAttribute []HistogramResourceAttribute
-	histogramScopeAttribute    []HistogramScopeAttribute
-	histogramDatapoint         []HistogramDatapoint
-	histogramDatapointAtribute []HistogramDataPointAttribute
-	histogramBucketCount       []HistogramDatapointBucketCount
-	histogramExplicitBound     []HistogramDatapointExplicitBound
-	exemplars                  []HistogramDatapointExemplar
-	exemplarAttribute          []HistogramDataPointExemplarAttribute
+	histogram                   *Histogram
+	histogramResourceAttribute  []HistogramResourceAttribute
+	histogramScopeAttribute     []HistogramScopeAttribute
+	histogramDatapoint          []HistogramDatapoint
+	histogramDatapointAttribute []HistogramDataPointAttribute
+	histogramBucketCount        []HistogramDatapointBucketCount
+	histogramExplicitBound      []HistogramDatapointExplicitBound
+	exemplars                   []HistogramDatapointExemplar
+	exemplarAttribute           []HistogramDataPointExemplarAttribute
 }
 
 type kineticaExponentialHistogramRecord struct {
@@ -143,7 +144,6 @@ func newMetricsExporter(logger *zap.Logger, cfg *Config) *kineticaMetricsExporte
 }
 
 func (e *kineticaMetricsExporter) start(ctx context.Context, _ component.Host) error {
-
 	fmt.Println("SCHEMA NAME - ", e.writer.cfg.Schema)
 
 	if e.writer.cfg.Schema != "" && len(e.writer.cfg.Schema) != 0 {
@@ -209,7 +209,6 @@ func createTablesForMetricType(ctx context.Context, metricTypeDDLs []string, kiW
 	}
 
 	lo.ForEach(metricTypeDDLs, func(ddl string, _ int) {
-
 		stmt := strings.ReplaceAll(ddl, "%s", schema)
 		kiWriter.logger.Debug("Creating Table - ", zap.String("DDL", stmt))
 
@@ -251,7 +250,6 @@ func (e *kineticaMetricsExporter) shutdown(_ context.Context) error {
 //	@param md
 //	@return error
 func (e *kineticaMetricsExporter) pushMetricsData(_ context.Context, md pmetric.Metrics) error {
-
 	var metricType pmetric.MetricType
 	var errs []error
 
@@ -277,7 +275,6 @@ func (e *kineticaMetricsExporter) pushMetricsData(_ context.Context, md pmetric.
 			e.logger.Debug("metrics ", zap.Int("count = ", metricSlice.Len()))
 
 			for k := 0; k < metricSlice.Len(); k++ {
-
 				metric := metricSlice.At(k)
 				metricType = metric.Type()
 				switch metric.Type() {
@@ -327,7 +324,7 @@ func (e *kineticaMetricsExporter) pushMetricsData(_ context.Context, md pmetric.
 						errs = append(errs, err)
 					}
 				default:
-					return fmt.Errorf("Unsupported metrics type")
+					return errors.New("Unsupported metrics type")
 				}
 
 				e.logger.Debug("Gauge ", zap.Int("count = ", len(gaugeRecords)))
@@ -373,15 +370,14 @@ func (e *kineticaMetricsExporter) pushMetricsData(_ context.Context, md pmetric.
 			e.logger.Error(err.Error())
 		}
 	default:
-		return fmt.Errorf("Unsupported metrics type")
-
+		return errors.New("Unsupported metrics type")
 	}
 	return multierr.Combine(errs...)
 }
 
 // createSummaryRecord - creates a Summary type record
 //
-//	@receiver e - Method aplicable to [kineticaMetricsExporter]
+//	@receiver e - Method applicable to [kineticaMetricsExporter]
 //	@param resAttr - a map of key to value of resource attributes
 //	@param _ schemaURL - unused
 //	@param scopeInstr - the instrumentation scope
@@ -424,7 +420,7 @@ func (e *kineticaMetricsExporter) createSummaryRecord(resAttr pcommon.Map, _ str
 		kiSummaryRecord.summaryDatapoint = append(kiSummaryRecord.summaryDatapoint, *summaryDatapoint)
 
 		// Handle summary datapoint attribute
-		datapoint.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range datapoint.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Sum record attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -433,8 +429,7 @@ func (e *kineticaMetricsExporter) createSummaryRecord(resAttr pcommon.Map, _ str
 				e.logger.Debug("Invalid sum record attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range datapointAttributes {
 			vtPair := datapointAttributes[key]
@@ -464,14 +459,13 @@ func (e *kineticaMetricsExporter) createSummaryRecord(resAttr pcommon.Map, _ str
 			}
 			kiSummaryRecord.summaryDatapointQuantileValues = append(kiSummaryRecord.summaryDatapointQuantileValues, *summaryQV)
 		}
-
 	}
 
 	// Handle Resource attribute
 	var resourceAttribute []SummaryResourceAttribute
 	resourceAttributes := make(map[string]ValueTypePair)
 
-	resAttr.Range(func(k string, v pcommon.Value) bool {
+	for k, v := range resAttr.All() {
 		if k == "" {
 			e.logger.Debug("Resource attribute key is empty")
 		} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -480,8 +474,7 @@ func (e *kineticaMetricsExporter) createSummaryRecord(resAttr pcommon.Map, _ str
 			e.logger.Debug("Invalid resource attribute value", zap.String("Error", err.Error()))
 			errs = append(errs, err)
 		}
-		return true
-	})
+	}
 
 	for key := range resourceAttributes {
 		vtPair := resourceAttributes[key]
@@ -501,7 +494,7 @@ func (e *kineticaMetricsExporter) createSummaryRecord(resAttr pcommon.Map, _ str
 	scopeName := scopeInstr.Name()
 	scopeVersion := scopeInstr.Version()
 
-	scopeInstr.Attributes().Range(func(k string, v pcommon.Value) bool {
+	for k, v := range scopeInstr.Attributes().All() {
 		if k == "" {
 			e.logger.Debug("Scope attribute key is empty")
 		} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -510,8 +503,7 @@ func (e *kineticaMetricsExporter) createSummaryRecord(resAttr pcommon.Map, _ str
 			e.logger.Debug("Invalid scope attribute value", zap.String("Error", err.Error()))
 			errs = append(errs, err)
 		}
-		return true
-	})
+	}
 
 	for key := range scopeAttributes {
 		vtPair := scopeAttributes[key]
@@ -587,7 +579,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 		kiExpHistogramRecord.histogramDatapoint = append(kiExpHistogramRecord.histogramDatapoint, expHistogramDatapoint)
 
 		// Handle histogram datapoint attribute
-		datapoint.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range datapoint.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Sum record attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -596,8 +588,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 				e.logger.Debug("Invalid sum record attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range datapointAttributes {
 			vtPair := datapointAttributes[key]
@@ -631,7 +622,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 			kiExpHistogramRecord.exemplars = append(kiExpHistogramRecord.exemplars, sumDatapointExemplar)
 
 			// Handle Exemplar attribute
-			exemplar.FilteredAttributes().Range(func(k string, v pcommon.Value) bool {
+			for k, v := range exemplar.FilteredAttributes().All() {
 				if k == "" {
 					e.logger.Debug("Sum record attribute key is empty")
 				} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -640,8 +631,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 					e.logger.Debug("Invalid sum record attribute value", zap.String("Error", err.Error()))
 					errs = append(errs, err)
 				}
-				return true
-			})
+			}
 
 			for key := range exemplarAttributes {
 				vtPair := exemplarAttributes[key]
@@ -658,7 +648,6 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 			for k := range exemplarAttributes {
 				delete(exemplarAttributes, k)
 			}
-
 		}
 
 		// Handle positive and negative bucket counts
@@ -683,14 +672,13 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 			})
 		}
 		kiExpHistogramRecord.histogramBucketNegativeCount = append(kiExpHistogramRecord.histogramBucketNegativeCount, datapointBucketNegativeCount...)
-
 	}
 
 	// Handle Resource attribute
 	var resourceAttribute []ExponentialHistogramResourceAttribute
 	resourceAttributes := make(map[string]ValueTypePair)
 
-	resAttr.Range(func(k string, v pcommon.Value) bool {
+	for k, v := range resAttr.All() {
 		if k == "" {
 			e.logger.Debug("Resource attribute key is empty")
 		} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -699,8 +687,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 			e.logger.Debug("Invalid resource attribute value", zap.String("Error", err.Error()))
 			errs = append(errs, err)
 		}
-		return true
-	})
+	}
 
 	for key := range resourceAttributes {
 		vtPair := resourceAttributes[key]
@@ -720,7 +707,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 	scopeName := scopeInstr.Name()
 	scopeVersion := scopeInstr.Version()
 
-	scopeInstr.Attributes().Range(func(k string, v pcommon.Value) bool {
+	for k, v := range scopeInstr.Attributes().All() {
 		if k == "" {
 			e.logger.Debug("Scope attribute key is empty")
 		} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -729,8 +716,7 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 			e.logger.Debug("Invalid scope attribute value", zap.String("Error", err.Error()))
 			errs = append(errs, err)
 		}
-		return true
-	})
+	}
 
 	for key := range scopeAttributes {
 		vtPair := scopeAttributes[key]
@@ -761,7 +747,6 @@ func (e *kineticaMetricsExporter) createExponentialHistogramRecord(resAttr pcomm
 //	@return *kineticaHistogramRecord
 //	@return error
 func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ string, scopeInstr pcommon.InstrumentationScope, _ string, histogramRecord pmetric.Histogram, name, description, unit string) (*kineticaHistogramRecord, error) {
-
 	e.logger.Debug("In createHistogramRecord ...")
 
 	var errs []error
@@ -803,7 +788,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 		kiHistogramRecord.histogramDatapoint = append(kiHistogramRecord.histogramDatapoint, *histogramDatapoint)
 
 		// Handle histogram datapoint attribute
-		datapoint.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range datapoint.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Histogram record attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -812,8 +797,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 				e.logger.Debug("Invalid histogram record attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range datapointAttributes {
 			vtPair := datapointAttributes[key]
@@ -824,7 +808,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 				datapointAttribute = append(datapointAttribute, *sa)
 			}
 		}
-		kiHistogramRecord.histogramDatapointAtribute = append(kiHistogramRecord.histogramDatapointAtribute, datapointAttribute...)
+		kiHistogramRecord.histogramDatapointAttribute = append(kiHistogramRecord.histogramDatapointAttribute, datapointAttribute...)
 
 		for k := range datapointAttributes {
 			delete(datapointAttributes, k)
@@ -847,7 +831,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 			kiHistogramRecord.exemplars = append(kiHistogramRecord.exemplars, histogramDatapointExemplar)
 
 			// Handle Exemplar attribute
-			exemplar.FilteredAttributes().Range(func(k string, v pcommon.Value) bool {
+			for k, v := range exemplar.FilteredAttributes().All() {
 				if k == "" {
 					e.logger.Debug("Histogram record attribute key is empty")
 				} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -856,8 +840,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 					e.logger.Debug("Invalid histogram record attribute value", zap.String("Error", err.Error()))
 					errs = append(errs, err)
 				}
-				return true
-			})
+			}
 
 			for key := range exemplarAttributes {
 				vtPair := exemplarAttributes[key]
@@ -904,7 +887,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 	resourceAttributes := make(map[string]ValueTypePair)
 
 	if resAttr.Len() > 0 {
-		resAttr.Range(func(k string, v pcommon.Value) bool {
+		for k, v := range resAttr.All() {
 			if k == "" {
 				e.logger.Debug("Resource attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -913,8 +896,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 				e.logger.Debug("Invalid resource attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range resourceAttributes {
 			vtPair := resourceAttributes[key]
@@ -928,7 +910,6 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 
 		kiHistogramRecord.histogramResourceAttribute = make([]HistogramResourceAttribute, len(resourceAttribute))
 		copy(kiHistogramRecord.histogramResourceAttribute, resourceAttribute)
-
 	}
 
 	// Handle Scope attribute
@@ -938,7 +919,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 	scopeVersion := scopeInstr.Version()
 
 	if scopeInstr.Attributes().Len() > 0 {
-		scopeInstr.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range scopeInstr.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Scope attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -947,8 +928,7 @@ func (e *kineticaMetricsExporter) createHistogramRecord(resAttr pcommon.Map, _ s
 				e.logger.Debug("Invalid scope attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range scopeAttributes {
 			vtPair := scopeAttributes[key]
@@ -1021,7 +1001,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 		kiSumRecord.datapoint = append(kiSumRecord.datapoint, sumDatapoint)
 
 		// Handle Sum attribute
-		datapoint.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range datapoint.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Sum record attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1030,8 +1010,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 				e.logger.Debug("Invalid sum record attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range sumDatapointAttributes {
 			vtPair := sumDatapointAttributes[key]
@@ -1065,7 +1044,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 			kiSumRecord.exemplars = append(kiSumRecord.exemplars, sumDatapointExemplar)
 
 			// Handle Exemplar attribute
-			exemplar.FilteredAttributes().Range(func(k string, v pcommon.Value) bool {
+			for k, v := range exemplar.FilteredAttributes().All() {
 				if k == "" {
 					e.logger.Debug("Sum record attribute key is empty")
 				} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1074,8 +1053,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 					e.logger.Debug("Invalid sum record attribute value", zap.String("Error", err.Error()))
 					errs = append(errs, err)
 				}
-				return true
-			})
+			}
 
 			for key := range exemplarAttributes {
 				vtPair := exemplarAttributes[key]
@@ -1092,9 +1070,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 			for k := range exemplarAttributes {
 				delete(exemplarAttributes, k)
 			}
-
 		}
-
 	}
 
 	// Handle Resource attribute
@@ -1102,7 +1078,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 	resourceAttributes := make(map[string]ValueTypePair)
 
 	if resAttr.Len() > 0 {
-		resAttr.Range(func(k string, v pcommon.Value) bool {
+		for k, v := range resAttr.All() {
 			if k == "" {
 				e.logger.Debug("Resource attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1111,8 +1087,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 				e.logger.Debug("Invalid resource attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range resourceAttributes {
 			vtPair := resourceAttributes[key]
@@ -1135,7 +1110,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 	scopeVersion := scopeInstr.Version()
 
 	if scopeInstr.Attributes().Len() > 0 {
-		scopeInstr.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range scopeInstr.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Scope attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1144,8 +1119,7 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 				e.logger.Debug("Invalid scope attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range scopeAttributes {
 			vtPair := scopeAttributes[key]
@@ -1167,7 +1141,6 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 			Key:            "",
 			AttributeValue: AttributeValue{},
 		})
-
 	}
 
 	return kiSumRecord, multierr.Combine(errs...)
@@ -1187,7 +1160,6 @@ func (e *kineticaMetricsExporter) createSumRecord(resAttr pcommon.Map, _ string,
 //	@return *kineticaGaugeRecord
 //	@return error
 func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ string, scopeInstr pcommon.InstrumentationScope, _ string, gaugeRecord pmetric.Gauge, name, description, unit string) (*kineticaGaugeRecord, error) {
-
 	var errs []error
 
 	kiGaugeRecord := new(kineticaGaugeRecord)
@@ -1221,7 +1193,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 		}
 		kiGaugeRecord.datapoint = append(kiGaugeRecord.datapoint, gaugeDatapoint)
 
-		datapoint.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range datapoint.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Gauge record attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1230,8 +1202,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 				e.logger.Debug("Invalid gauge record attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		for key := range gaugeDatapointAttributes {
 			vtPair := gaugeDatapointAttributes[key]
@@ -1265,7 +1236,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 			kiGaugeRecord.exemplars = append(kiGaugeRecord.exemplars, gaugeDatapointExemplar)
 
 			// Handle Exemplar attribute
-			exemplar.FilteredAttributes().Range(func(k string, v pcommon.Value) bool {
+			for k, v := range exemplar.FilteredAttributes().All() {
 				if k == "" {
 					e.logger.Debug("Sum record attribute key is empty")
 				} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1274,8 +1245,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 					e.logger.Debug("Invalid sum record attribute value", zap.String("Error", err.Error()))
 					errs = append(errs, err)
 				}
-				return true
-			})
+			}
 
 			for key := range exemplarAttributes {
 				vtPair := exemplarAttributes[key]
@@ -1302,7 +1272,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 	resourceAttributes := make(map[string]ValueTypePair)
 
 	if resAttr.Len() > 0 {
-		resAttr.Range(func(k string, v pcommon.Value) bool {
+		for k, v := range resAttr.All() {
 			if k == "" {
 				e.logger.Debug("Resource attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1311,8 +1281,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 				e.logger.Debug("Invalid resource attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		e.logger.Debug("Resource Attributes to be added ->", zap.Any("Attributes", resourceAttributes))
 		for key := range resourceAttributes {
@@ -1342,7 +1311,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 	scopeVersion := scopeInstr.Version()
 
 	if scopeInstr.Attributes().Len() > 0 {
-		scopeInstr.Attributes().Range(func(k string, v pcommon.Value) bool {
+		for k, v := range scopeInstr.Attributes().All() {
 			if k == "" {
 				e.logger.Debug("Scope attribute key is empty")
 			} else if v, err := attributeValueToKineticaFieldValue(v); err == nil {
@@ -1351,8 +1320,7 @@ func (e *kineticaMetricsExporter) createGaugeRecord(resAttr pcommon.Map, _ strin
 				e.logger.Debug("Invalid scope attribute value", zap.String("Error", err.Error()))
 				errs = append(errs, err)
 			}
-			return true
-		})
+		}
 
 		e.logger.Debug("Scope Attributes to be added ->", zap.Any("Attributes", scopeAttributes))
 		for key := range scopeAttributes {
@@ -1605,7 +1573,6 @@ func (e *kineticaMetricsExporter) newSummaryScopeAttributeValue(summaryID string
 
 	sa := &SummaryScopeAttribute{summaryID, key, scopeName, scopeVersion, *av}
 	return sa, nil
-
 }
 
 func (e *kineticaMetricsExporter) newSummaryDatapointAttributeValue(summaryID string, summaryDatapointID string, key string, vtPair ValueTypePair) (*SummaryDataPointAttribute, error) {

@@ -12,7 +12,9 @@ import (
 	"github.com/spf13/cast"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
+	"go.opentelemetry.io/collector/confmap/xconfmap"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pipeline"
 	rcvr "go.opentelemetry.io/collector/receiver"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -74,7 +76,7 @@ func (run *receiverRunner) start(
 	var createError error
 	if consumer.logs != nil {
 		if wr.logs, err = run.createLogsRuntimeReceiver(receiverFactory, id, cfg, consumer); err != nil {
-			if errors.Is(err, component.ErrDataTypeIsNotSupported) {
+			if errors.Is(err, pipeline.ErrSignalNotSupported) {
 				run.logger.Info("instantiated receiver doesn't support logs", zap.String("receiver", receiver.id.String()), zap.Error(err))
 				wr.logs = nil
 			} else {
@@ -84,7 +86,7 @@ func (run *receiverRunner) start(
 	}
 	if consumer.metrics != nil {
 		if wr.metrics, err = run.createMetricsRuntimeReceiver(receiverFactory, id, cfg, consumer); err != nil {
-			if errors.Is(err, component.ErrDataTypeIsNotSupported) {
+			if errors.Is(err, pipeline.ErrSignalNotSupported) {
 				run.logger.Info("instantiated receiver doesn't support metrics", zap.String("receiver", receiver.id.String()), zap.Error(err))
 				wr.metrics = nil
 			} else {
@@ -94,7 +96,7 @@ func (run *receiverRunner) start(
 	}
 	if consumer.traces != nil {
 		if wr.traces, err = run.createTracesRuntimeReceiver(receiverFactory, id, cfg, consumer); err != nil {
-			if errors.Is(err, component.ErrDataTypeIsNotSupported) {
+			if errors.Is(err, pipeline.ErrSignalNotSupported) {
 				run.logger.Info("instantiated receiver doesn't support traces", zap.String("receiver", receiver.id.String()), zap.Error(err))
 				wr.traces = nil
 			} else {
@@ -136,6 +138,9 @@ func (run *receiverRunner) loadRuntimeReceiverConfig(
 	if err := mergedConfig.Unmarshal(receiverCfg); err != nil {
 		return nil, "", fmt.Errorf("failed to load %q template config: %w", receiver.id.String(), err)
 	}
+	if err := xconfmap.Validate(receiverCfg); err != nil {
+		return nil, "", fmt.Errorf("invalid runtime receiver config: receivers::%s: %w", receiver.id, err)
+	}
 	return receiverCfg, targetEndpoint, nil
 }
 
@@ -153,11 +158,8 @@ func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discove
 			endpointConfigKey: targetEndpoint,
 		})
 		if err := endpointConfig.Unmarshal(factory.CreateDefaultConfig()); err != nil {
-			// rather than attach to error content that can change over time,
-			// confirm the error only arises w/ ErrorUnused mapstructure setting ("invalid keys")
-			if err = endpointConfig.Unmarshal(factory.CreateDefaultConfig(), confmap.WithIgnoreUnused()); err == nil {
-				delete(discovered, endpointConfigKey)
-			}
+			// we assume that the error is due to unused keys in the config, so we need to remove endpoint key
+			delete(discovered, endpointConfigKey)
 		}
 	}
 	discoveredConfig := confmap.NewFromStringMap(discovered)
@@ -180,7 +182,7 @@ func (run *receiverRunner) createLogsRuntimeReceiver(
 	runParams := run.params
 	runParams.Logger = runParams.Logger.With(zap.String("name", id.String()))
 	runParams.ID = id
-	return factory.CreateLogsReceiver(context.Background(), runParams, cfg, nextConsumer)
+	return factory.CreateLogs(context.Background(), runParams, cfg, nextConsumer)
 }
 
 // createMetricsRuntimeReceiver creates a receiver that is discovered at runtime.
@@ -193,7 +195,7 @@ func (run *receiverRunner) createMetricsRuntimeReceiver(
 	runParams := run.params
 	runParams.Logger = runParams.Logger.With(zap.String("name", id.String()))
 	runParams.ID = id
-	return factory.CreateMetricsReceiver(context.Background(), runParams, cfg, nextConsumer)
+	return factory.CreateMetrics(context.Background(), runParams, cfg, nextConsumer)
 }
 
 // createTracesRuntimeReceiver creates a receiver that is discovered at runtime.
@@ -206,7 +208,7 @@ func (run *receiverRunner) createTracesRuntimeReceiver(
 	runParams := run.params
 	runParams.Logger = runParams.Logger.With(zap.String("name", id.String()))
 	runParams.ID = id
-	return factory.CreateTracesReceiver(context.Background(), runParams, cfg, nextConsumer)
+	return factory.CreateTraces(context.Background(), runParams, cfg, nextConsumer)
 }
 
 var _ component.Component = (*wrappedReceiver)(nil)

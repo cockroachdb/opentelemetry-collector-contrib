@@ -15,6 +15,7 @@ import (
 	"github.com/influxdata/influxdb-observability/influx2otel"
 	"github.com/influxdata/line-protocol/v2/lineprotocol"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -40,7 +41,7 @@ type metricsReceiver struct {
 }
 
 func newMetricsReceiver(config *Config, settings receiver.Settings, nextConsumer consumer.Metrics) (*metricsReceiver, error) {
-	influxLogger := newZapInfluxLogger(settings.TelemetrySettings.Logger)
+	influxLogger := newZapInfluxLogger(settings.Logger)
 	converter, err := influx2otel.NewLineProtocolToOtelMetrics(influxLogger)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (r *metricsReceiver) Start(ctx context.Context, host component.Host) error 
 	go func() {
 		defer r.wg.Done()
 		if errHTTP := r.server.Serve(ln); !errors.Is(errHTTP, http.ErrServerClosed) && errHTTP != nil {
-			r.settings.ReportStatus(component.NewFatalErrorEvent(errHTTP))
+			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(errHTTP))
 		}
 	}()
 
@@ -183,7 +184,7 @@ func (r *metricsReceiver) handleWrite(w http.ResponseWriter, req *http.Request) 
 		err = batch.AddPoint(string(measurement), tags, fields, ts, common.InfluxMetricValueTypeUntyped)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, "failed to append to the batch")
+			_, _ = fmt.Fprintf(w, "failed to append to the batch: %v", err)
 			return
 		}
 	}

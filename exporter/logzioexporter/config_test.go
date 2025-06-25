@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configcompression"
 	"go.opentelemetry.io/collector/config/confighttp"
-	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
@@ -37,18 +36,14 @@ func TestLoadConfig(t *testing.T) {
 		Region: "eu",
 	}
 	expected.BackOffConfig = configretry.NewDefaultBackOffConfig()
-	expected.BackOffConfig.MaxInterval = 5 * time.Second
-	expected.QueueSettings = exporterhelper.NewDefaultQueueSettings()
+	expected.MaxInterval = 5 * time.Second
+	expected.QueueSettings = exporterhelper.NewDefaultQueueConfig()
 	expected.QueueSettings.Enabled = false
-	expected.ClientConfig = confighttp.ClientConfig{
-		Endpoint: "",
-		Timeout:  30 * time.Second,
-		Headers:  map[string]configopaque.String{},
-		// Default to gzip compression
-		Compression: configcompression.TypeGzip,
-		// We almost read 0 bytes, so no need to tune ReadBufferSize.
-		WriteBufferSize: 512 * 1024,
-	}
+	clientConfig := confighttp.NewDefaultClientConfig()
+	clientConfig.Timeout = 30 * time.Second
+	clientConfig.Compression = configcompression.TypeGzip
+	clientConfig.WriteBufferSize = 512 * 1024
+	expected.ClientConfig = clientConfig
 	assert.Equal(t, expected, cfg)
 }
 
@@ -66,44 +61,42 @@ func TestDefaultLoadConfig(t *testing.T) {
 		Token: "logzioTESTtoken",
 	}
 	expected.BackOffConfig = configretry.NewDefaultBackOffConfig()
-	expected.QueueSettings = exporterhelper.NewDefaultQueueSettings()
-	expected.ClientConfig = confighttp.ClientConfig{
-		Endpoint: "",
-		Timeout:  30 * time.Second,
-		Headers:  map[string]configopaque.String{},
-		// Default to gzip compression
-		Compression: configcompression.TypeGzip,
-		// We almost read 0 bytes, so no need to tune ReadBufferSize.
-		WriteBufferSize: 512 * 1024,
-	}
+	expected.QueueSettings = exporterhelper.NewDefaultQueueConfig()
+	clientConfig := confighttp.NewDefaultClientConfig()
+	clientConfig.Timeout = 30 * time.Second
+	clientConfig.Compression = configcompression.TypeGzip
+	clientConfig.WriteBufferSize = 512 * 1024
+	expected.ClientConfig = clientConfig
 	assert.Equal(t, expected, cfg)
 }
 
 func TestCheckAndWarnDeprecatedOptions(t *testing.T) {
+	clientConfig := confighttp.NewDefaultClientConfig()
+	clientConfig.Timeout = 10 * time.Second
+	clientConfig.Compression = configcompression.TypeGzip
+	clientConfig.WriteBufferSize = 512 * 1024
 	// Config with legacy options
 	actualCfg := &Config{
-		QueueSettings:  exporterhelper.NewDefaultQueueSettings(),
+		QueueSettings:  exporterhelper.NewDefaultQueueConfig(),
 		BackOffConfig:  configretry.NewDefaultBackOffConfig(),
 		Token:          "logzioTESTtoken",
 		CustomEndpoint: "https://api.example.com",
 		QueueMaxLength: 10,
 		DrainInterval:  10,
-		ClientConfig: confighttp.ClientConfig{
-			Endpoint: "",
-			Timeout:  10 * time.Second,
-			Headers:  map[string]configopaque.String{},
-			// Default to gzip compression
-			Compression: configcompression.TypeGzip,
-			// We almost read 0 bytes, so no need to tune ReadBufferSize.
-			WriteBufferSize: 512 * 1024,
-		},
+		ClientConfig:   clientConfig,
 	}
-	params := exportertest.NewNopSettings()
+	params := exportertest.NewNopSettings(metadata.Type)
 	logger := hclog2ZapLogger{
 		Zap:  params.Logger,
 		name: loggerName,
 	}
 	actualCfg.checkAndWarnDeprecatedOptions(&logger)
+
+	clientConfigEndpoint := confighttp.NewDefaultClientConfig()
+	clientConfigEndpoint.Timeout = 10 * time.Second
+	clientConfigEndpoint.Compression = configcompression.TypeGzip
+	clientConfigEndpoint.WriteBufferSize = 512 * 1024
+	clientConfigEndpoint.Endpoint = "https://api.example.com"
 
 	expected := &Config{
 		Token:          "logzioTESTtoken",
@@ -111,16 +104,8 @@ func TestCheckAndWarnDeprecatedOptions(t *testing.T) {
 		QueueMaxLength: 10,
 		DrainInterval:  10,
 		BackOffConfig:  configretry.NewDefaultBackOffConfig(),
-		QueueSettings:  exporterhelper.NewDefaultQueueSettings(),
-		ClientConfig: confighttp.ClientConfig{
-			Endpoint: "https://api.example.com",
-			Timeout:  10 * time.Second,
-			Headers:  map[string]configopaque.String{},
-			// Default to gzip compression
-			Compression: configcompression.TypeGzip,
-			// We almost read 0 bytes, so no need to tune ReadBufferSize.
-			WriteBufferSize: 512 * 1024,
-		},
+		QueueSettings:  exporterhelper.NewDefaultQueueConfig(),
+		ClientConfig:   clientConfigEndpoint,
 	}
 	expected.QueueSettings.QueueSize = 10
 	assert.Equal(t, expected, actualCfg)

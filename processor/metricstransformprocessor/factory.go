@@ -49,7 +49,7 @@ func createMetricsProcessor(
 	}
 	metricsProcessor := newMetricsTransformProcessor(set.Logger, hCfg)
 
-	return processorhelper.NewMetricsProcessor(
+	return processorhelper.NewMetrics(
 		ctx,
 		set,
 		cfg,
@@ -127,7 +127,6 @@ func validateConfiguration(config *Config) error {
 func buildHelperConfig(config *Config, version string) ([]internalTransform, error) {
 	helperDataTransforms := make([]internalTransform, len(config.Transforms))
 	for i, t := range config.Transforms {
-
 		if t.MetricIncludeFilter.MatchType == "" {
 			t.MetricIncludeFilter.MatchType = strictMatchType
 		}
@@ -155,9 +154,10 @@ func buildHelperConfig(config *Config, version string) ([]internalTransform, err
 			if len(op.ValueActions) > 0 {
 				mtpOp.valueActionsMapping = createLabelValueMapping(op.ValueActions, version)
 			}
-			if op.Action == aggregateLabels {
+			switch op.Action {
+			case aggregateLabels:
 				mtpOp.labelSetMap = sliceToSet(op.LabelSet)
-			} else if op.Action == aggregateLabelValues {
+			case aggregateLabelValues:
 				mtpOp.aggregatedValuesSet = sliceToSet(op.AggregatedValues)
 			}
 			helperT.Operations[j] = mtpOp

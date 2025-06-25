@@ -15,8 +15,11 @@ import (
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter/internal"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter/internal/metadata"
 )
+
+const clickhouseDriverName = "clickhouse"
 
 // NewFactory creates a factory for ClickHouse exporter.
 func NewFactory() exporter.Factory {
@@ -31,17 +34,26 @@ func NewFactory() exporter.Factory {
 
 func createDefaultConfig() component.Config {
 	return &Config{
-		TimeoutSettings:  exporterhelper.NewDefaultTimeoutSettings(),
-		QueueSettings:    exporterhelper.NewDefaultQueueSettings(),
+		collectorVersion: "unknown",
+		driverName:       clickhouseDriverName,
+
+		TimeoutSettings:  exporterhelper.NewDefaultTimeoutConfig(),
+		QueueSettings:    exporterhelper.NewDefaultQueueConfig(),
 		BackOffConfig:    configretry.NewDefaultBackOffConfig(),
 		ConnectionParams: map[string]string{},
 		Database:         defaultDatabase,
 		LogsTableName:    "otel_logs",
 		TracesTableName:  "otel_traces",
-		MetricsTableName: "otel_metrics",
 		TTL:              0,
 		CreateSchema:     true,
 		AsyncInsert:      true,
+		MetricsTables: MetricTablesConfig{
+			Gauge:                internal.MetricTypeConfig{Name: defaultMetricTableName + defaultGaugeSuffix},
+			Sum:                  internal.MetricTypeConfig{Name: defaultMetricTableName + defaultSumSuffix},
+			Summary:              internal.MetricTypeConfig{Name: defaultMetricTableName + defaultSummarySuffix},
+			Histogram:            internal.MetricTypeConfig{Name: defaultMetricTableName + defaultHistogramSuffix},
+			ExponentialHistogram: internal.MetricTypeConfig{Name: defaultMetricTableName + defaultExpHistogramSuffix},
+		},
 	}
 }
 
@@ -53,12 +65,13 @@ func createLogsExporter(
 	cfg component.Config,
 ) (exporter.Logs, error) {
 	c := cfg.(*Config)
+	c.collectorVersion = set.BuildInfo.Version
 	exporter, err := newLogsExporter(set.Logger, c)
 	if err != nil {
 		return nil, fmt.Errorf("cannot configure clickhouse logs exporter: %w", err)
 	}
 
-	return exporterhelper.NewLogsExporter(
+	return exporterhelper.NewLogs(
 		ctx,
 		set,
 		cfg,
@@ -79,12 +92,13 @@ func createTracesExporter(
 	cfg component.Config,
 ) (exporter.Traces, error) {
 	c := cfg.(*Config)
+	c.collectorVersion = set.BuildInfo.Version
 	exporter, err := newTracesExporter(set.Logger, c)
 	if err != nil {
 		return nil, fmt.Errorf("cannot configure clickhouse traces exporter: %w", err)
 	}
 
-	return exporterhelper.NewTracesExporter(
+	return exporterhelper.NewTraces(
 		ctx,
 		set,
 		cfg,
@@ -103,12 +117,13 @@ func createMetricExporter(
 	cfg component.Config,
 ) (exporter.Metrics, error) {
 	c := cfg.(*Config)
+	c.collectorVersion = set.BuildInfo.Version
 	exporter, err := newMetricsExporter(set.Logger, c)
 	if err != nil {
 		return nil, fmt.Errorf("cannot configure clickhouse metrics exporter: %w", err)
 	}
 
-	return exporterhelper.NewMetricsExporter(
+	return exporterhelper.NewMetrics(
 		ctx,
 		set,
 		cfg,

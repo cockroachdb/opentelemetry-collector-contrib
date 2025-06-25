@@ -8,6 +8,12 @@ elasticsearch/trace:
   headers:
     myheader: test
   traces_index: trace_index
+  traces_dynamic_index:
+    enabled: false
+  logs_dynamic_index:
+    enabled: false
+  metrics_dynamic_index:
+    enabled: false
   pipeline: mypipeline
   user: elastic
   password: search
@@ -17,7 +23,7 @@ elasticsearch/trace:
   flush:
     bytes: 10485760
   retry:
-    max_requests: 5
+    max_retries: 5
     retry_on_status:
       - 429
       - 500
@@ -26,6 +32,12 @@ elasticsearch/metric:
     insecure: false
   endpoints: [http://localhost:9200]
   metrics_index: my_metric_index
+  traces_dynamic_index:
+    enabled: false
+  logs_dynamic_index:
+    enabled: false
+  metrics_dynamic_index:
+    enabled: false
   timeout: 2m
   headers:
     myheader: test
@@ -38,7 +50,7 @@ elasticsearch/metric:
   flush:
     bytes: 10485760
   retry:
-    max_requests: 5
+    max_retries: 5
     retry_on_status:
       - 429
       - 500
@@ -49,6 +61,12 @@ elasticsearch/log:
     insecure: false
   endpoints: [http://localhost:9200]
   logs_index: my_log_index
+  traces_dynamic_index:
+    enabled: false
+  logs_dynamic_index:
+    enabled: false
+  metrics_dynamic_index:
+    enabled: false
   timeout: 2m
   headers:
     myheader: test
@@ -61,7 +79,7 @@ elasticsearch/log:
   flush:
     bytes: 10485760
   retry:
-    max_requests: 5
+    max_retries: 5
     retry_on_status:
       - 429
       - 500
@@ -77,12 +95,23 @@ elasticsearch/raw:
     mode: raw
 elasticsearch/cloudid:
   cloudid: foo:YmFyLmNsb3VkLmVzLmlvJGFiYzEyMyRkZWY0NTY=
-elasticsearch/deprecated_index:
-  endpoints: [https://elastic.example.com:9200]
-  index: my_log_index
 elasticsearch/confighttp_endpoint:
   endpoint: https://elastic.example.com:9200
 elasticsearch/batcher_disabled:
   endpoint: https://elastic.example.com:9200
   batcher:
     enabled: false
+elasticsearch/compression_none:
+  endpoint: https://elastic.example.com:9200
+  compression: none
+elasticsearch/compression_gzip:
+  endpoint: https://elastic.example.com:9200
+  compression: gzip
+elasticsearch/batcher_minmax_size:
+  endpoint: https://elastic.example.com:9200
+  batcher:
+    min_size: 100
+    max_size: 200
+elasticsearch/include_source_on_error:
+  endpoint: https://elastic.example.com:9200
+  include_source_on_error: true

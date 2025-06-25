@@ -8,9 +8,9 @@ import (
 
 var (
 	Type      = component.MustNewType("googlecloudmonitoring")
-	ScopeName = "otelcol/googlecloudmonitoringreceiver"
+	ScopeName = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudmonitoringreceiver"
 )
 
 const (
-	MetricsStability = component.StabilityLevelDevelopment
+	MetricsStability = component.StabilityLevelAlpha
 )

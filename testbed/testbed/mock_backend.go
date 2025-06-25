@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -22,8 +22,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var errNonPermanent = errors.New("non permanent error")
-var errPermanent = errors.New("permanent error")
+var (
+	errNonPermanent = errors.New("non permanent error")
+	errPermanent    = errors.New("permanent error")
+)
 
 type decisionFunc func() error
 
@@ -154,6 +156,12 @@ func (mb *MockBackend) ClearReceivedItems() {
 	mb.ReceivedLogs = nil
 }
 
+func (mb *MockBackend) GetReceivedLogs() []plog.Logs {
+	mb.recordMutex.Lock()
+	defer mb.recordMutex.Unlock()
+	return mb.ReceivedLogs
+}
+
 func (mb *MockBackend) ConsumeTrace(td ptrace.Traces) {
 	mb.recordMutex.Lock()
 	defer mb.recordMutex.Unlock()
@@ -218,7 +226,6 @@ func (tc *MockTraceConsumer) ConsumeTraces(_ context.Context, td ptrace.Traces) 
 				// Ignore the seqnums for now. We will use them later.
 				_ = spanSeqnum
 				_ = traceSeqnum
-
 			}
 		}
 	}

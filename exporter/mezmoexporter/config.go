@@ -4,7 +4,7 @@
 package mezmoexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/mezmoexporter"
 
 import (
-	"fmt"
+	"errors"
 	"net/url"
 	"time"
 
@@ -33,9 +33,9 @@ const (
 
 // Config defines configuration for Mezmo exporter.
 type Config struct {
-	confighttp.ClientConfig      `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
-	exporterhelper.QueueSettings `mapstructure:"sending_queue"`
-	configretry.BackOffConfig    `mapstructure:"retry_on_failure"`
+	confighttp.ClientConfig   `mapstructure:",squash"`        // squash ensures fields are correctly decoded in embedded struct.
+	QueueSettings             exporterhelper.QueueBatchConfig `mapstructure:"sending_queue"`
+	configretry.BackOffConfig `mapstructure:"retry_on_failure"`
 
 	// IngestURL is the URL to send telemetry to.
 	IngestURL string `mapstructure:"ingest_url"`
@@ -46,9 +46,9 @@ type Config struct {
 
 // returns default http client settings
 func createDefaultClientConfig() confighttp.ClientConfig {
-	return confighttp.ClientConfig{
-		Timeout: defaultTimeout,
-	}
+	clientConfig := confighttp.NewDefaultClientConfig()
+	clientConfig.Timeout = defaultTimeout
+	return clientConfig
 }
 
 func (c *Config) Validate() error {
@@ -57,11 +57,11 @@ func (c *Config) Validate() error {
 
 	parsed, err = url.Parse(c.IngestURL)
 	if c.IngestURL == "" || err != nil {
-		return fmt.Errorf(`"ingest_url" must be a valid URL`)
+		return errors.New(`"ingest_url" must be a valid URL`)
 	}
 
 	if parsed.Host == "" {
-		return fmt.Errorf(`"ingest_url" must contain a valid host`)
+		return errors.New(`"ingest_url" must contain a valid host`)
 	}
 
 	return nil

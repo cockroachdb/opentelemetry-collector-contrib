@@ -4,13 +4,12 @@ package metadata
 
 import (
 	"errors"
+	"sync"
 
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtelemetry"
 )
 
 func Meter(settings component.TelemetrySettings) metric.Meter {
@@ -25,6 +24,11 @@ func Tracer(settings component.TelemetrySettings) trace.Tracer {
 // as defined in metadata and user config.
 type TelemetryBuilder struct {
 	meter                       metric.Meter
+	mu                          sync.Mutex
+	registrations               []metric.Registration
+	OtelsvcK8sDeploymentAdded   metric.Int64Counter
+	OtelsvcK8sDeploymentDeleted metric.Int64Counter
+	OtelsvcK8sDeploymentUpdated metric.Int64Counter
 	OtelsvcK8sIPLookupMiss      metric.Int64Counter
 	OtelsvcK8sNamespaceAdded    metric.Int64Counter
 	OtelsvcK8sNamespaceDeleted  metric.Int64Counter
@@ -39,32 +43,55 @@ type TelemetryBuilder struct {
 	OtelsvcK8sReplicasetAdded   metric.Int64Counter
 	OtelsvcK8sReplicasetDeleted metric.Int64Counter
 	OtelsvcK8sReplicasetUpdated metric.Int64Counter
-	level                       configtelemetry.Level
 }
 
-// telemetryBuilderOption applies changes to default builder.
-type telemetryBuilderOption func(*TelemetryBuilder)
+// TelemetryBuilderOption applies changes to default builder.
+type TelemetryBuilderOption interface {
+	apply(*TelemetryBuilder)
+}
 
-// WithLevel sets the current telemetry level for the component.
-func WithLevel(lvl configtelemetry.Level) telemetryBuilderOption {
-	return func(builder *TelemetryBuilder) {
-		builder.level = lvl
+type telemetryBuilderOptionFunc func(mb *TelemetryBuilder)
+
+func (tbof telemetryBuilderOptionFunc) apply(mb *TelemetryBuilder) {
+	tbof(mb)
+}
+
+// Shutdown unregister all registered callbacks for async instruments.
+func (builder *TelemetryBuilder) Shutdown() {
+	builder.mu.Lock()
+	defer builder.mu.Unlock()
+	for _, reg := range builder.registrations {
+		reg.Unregister()
 	}
 }
 
 // NewTelemetryBuilder provides a struct with methods to update all internal telemetry
 // for a component
-func NewTelemetryBuilder(settings component.TelemetrySettings, options ...telemetryBuilderOption) (*TelemetryBuilder, error) {
-	builder := TelemetryBuilder{level: configtelemetry.LevelBasic}
+func NewTelemetryBuilder(settings component.TelemetrySettings, options ...TelemetryBuilderOption) (*TelemetryBuilder, error) {
+	builder := TelemetryBuilder{}
 	for _, op := range options {
-		op(&builder)
+		op.apply(&builder)
 	}
+	builder.meter = Meter(settings)
 	var err, errs error
-	if builder.level >= configtelemetry.LevelBasic {
-		builder.meter = Meter(settings)
-	} else {
-		builder.meter = noop.Meter{}
-	}
+	builder.OtelsvcK8sDeploymentAdded, err = builder.meter.Int64Counter(
+		"otelcol_otelsvc_k8s_deployment_added",
+		metric.WithDescription("Number of deployment add events received"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
+	builder.OtelsvcK8sDeploymentDeleted, err = builder.meter.Int64Counter(
+		"otelcol_otelsvc_k8s_deployment_deleted",
+		metric.WithDescription("Number of deployment delete events received"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
+	builder.OtelsvcK8sDeploymentUpdated, err = builder.meter.Int64Counter(
+		"otelcol_otelsvc_k8s_deployment_updated",
+		metric.WithDescription("Number of deployment update events received"),
+		metric.WithUnit("1"),
+	)
+	errs = errors.Join(errs, err)
 	builder.OtelsvcK8sIPLookupMiss, err = builder.meter.Int64Counter(
 		"otelcol_otelsvc_k8s_ip_lookup_miss",
 		metric.WithDescription("Number of times pod by IP lookup failed."),

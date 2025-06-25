@@ -4,17 +4,21 @@
 package postgresqlreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver"
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/collector/receiver/scrapererror"
+	"go.opentelemetry.io/collector/scraper/scrapererror"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver/internal/metadata"
@@ -27,13 +31,11 @@ const (
 	defaultPostgreSQLDatabase = "postgres"
 )
 
-var (
-	separateSchemaAttrGate = featuregate.GlobalRegistry().MustRegister(
-		separateSchemaAttrID,
-		featuregate.StageAlpha,
-		featuregate.WithRegisterDescription("Moves Schema Names into dedicated Attribute"),
-		featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/29559"),
-	)
+var separateSchemaAttrGate = featuregate.GlobalRegistry().MustRegister(
+	separateSchemaAttrID,
+	featuregate.StageAlpha,
+	featuregate.WithRegisterDescription("Moves Schema Names into dedicated Attribute"),
+	featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/29559"),
 )
 
 type postgreSQLScraper struct {
@@ -42,9 +44,10 @@ type postgreSQLScraper struct {
 	clientFactory postgreSQLClientFactory
 	mb            *metadata.MetricsBuilder
 	excludes      map[string]struct{}
-
+	cache         *lru.Cache[string, float64]
 	// if enabled, uses a separated attribute for the schema
 	separateSchemaAttr bool
+	queryPlanCache     *expirable.LRU[string, string]
 }
 
 type errsMux struct {
@@ -74,6 +77,8 @@ func newPostgreSQLScraper(
 	settings receiver.Settings,
 	config *Config,
 	clientFactory postgreSQLClientFactory,
+	cache *lru.Cache[string, float64],
+	queryPlanCache *expirable.LRU[string, string],
 ) *postgreSQLScraper {
 	excludes := make(map[string]struct{})
 	for _, db := range config.ExcludeDatabases {
@@ -88,12 +93,13 @@ func newPostgreSQLScraper(
 	}
 
 	return &postgreSQLScraper{
-		logger:        settings.Logger,
-		config:        config,
-		clientFactory: clientFactory,
-		mb:            metadata.NewMetricsBuilder(config.MetricsBuilderConfig, settings),
-		excludes:      excludes,
-
+		logger:             settings.Logger,
+		config:             config,
+		clientFactory:      clientFactory,
+		mb:                 metadata.NewMetricsBuilder(config.MetricsBuilderConfig, settings),
+		excludes:           excludes,
+		cache:              cache,
+		queryPlanCache:     queryPlanCache,
 		separateSchemaAttr: separateSchemaAttr,
 	}
 }
@@ -165,6 +171,202 @@ func (p *postgreSQLScraper) scrape(ctx context.Context) (pmetric.Metrics, error)
 	return p.mb.Emit(), errs.combine()
 }
 
+func (p *postgreSQLScraper) scrapeQuerySamples(ctx context.Context, maxRowsPerQuery int64) (plog.Logs, error) {
+	logs := plog.NewLogs()
+	resourceLog := logs.ResourceLogs().AppendEmpty()
+
+	scopedLog := resourceLog.ScopeLogs().AppendEmpty()
+	scopedLog.Scope().SetName(metadata.ScopeName)
+	scopedLog.Scope().SetVersion("0.0.1")
+
+	dbClient, err := p.clientFactory.getClient(defaultPostgreSQLDatabase)
+	if err != nil {
+		p.logger.Error("Failed to initialize connection to postgres", zap.Error(err))
+		return logs, err
+	}
+
+	var errs errsMux
+
+	logRecords := scopedLog.LogRecords()
+
+	p.collectQuerySamples(ctx, dbClient, &logRecords, maxRowsPerQuery, &errs, p.logger)
+
+	defer dbClient.Close()
+
+	return logs, nil
+}
+
+func (p *postgreSQLScraper) scrapeTopQuery(ctx context.Context, maxRowsPerQuery int64, topNQuery int64, maxExplainEachInterval int64) (plog.Logs, error) {
+	logs := plog.NewLogs()
+	resourceLog := logs.ResourceLogs().AppendEmpty()
+
+	scopedLog := resourceLog.ScopeLogs().AppendEmpty()
+	scopedLog.Scope().SetName(metadata.ScopeName)
+	scopedLog.Scope().SetVersion("0.0.1")
+
+	var errs errsMux
+
+	logRecords := scopedLog.LogRecords()
+
+	p.collectTopQuery(ctx, p.clientFactory, &logRecords, maxRowsPerQuery, topNQuery, maxExplainEachInterval, &errs, p.logger)
+
+	return logs, nil
+}
+
+func (p *postgreSQLScraper) collectQuerySamples(ctx context.Context, dbClient client, logRecords *plog.LogRecordSlice, limit int64, mux *errsMux, logger *zap.Logger) {
+	timestamp := pcommon.NewTimestampFromTime(time.Now())
+
+	attributes, err := dbClient.getQuerySamples(ctx, limit, logger)
+	if err != nil {
+		mux.addPartial(err)
+		return
+	}
+	for _, atts := range attributes {
+		record := logRecords.AppendEmpty()
+		record.SetTimestamp(timestamp)
+		record.SetEventName("query sample")
+		if err := record.Attributes().FromRaw(atts); err != nil {
+			mux.addPartial(err)
+			logger.Error("failed to read attributes from row", zap.Error(err))
+		}
+		record.Body().SetStr("sample")
+	}
+}
+
+func (p *postgreSQLScraper) collectTopQuery(ctx context.Context, clientFactory postgreSQLClientFactory, logRecords *plog.LogRecordSlice, limit int64, topNQuery int64, maxExplainEachInterval int64, mux *errsMux, logger *zap.Logger) {
+	timestamp := pcommon.NewTimestampFromTime(time.Now())
+
+	defaultDbClient, err := clientFactory.getClient(defaultPostgreSQLDatabase)
+	if err != nil {
+		logger.Error("failed to create db client for default postgresql database")
+		mux.addPartial(err)
+		return
+	}
+
+	defer defaultDbClient.Close()
+
+	rows, err := defaultDbClient.getTopQuery(ctx, limit, logger)
+	if err != nil {
+		logger.Error("failed to get top query", zap.Error(err))
+		mux.addPartial(err)
+		return
+	}
+
+	type updatedOnlyInfo struct {
+		finalConverter func(float64) any
+	}
+
+	convertToInt := func(f float64) any {
+		return int64(f)
+	}
+
+	updatedOnly := map[string]updatedOnlyInfo{
+		totalExecTimeColumnName:     {},
+		totalPlanTimeColumnName:     {},
+		rowsColumnName:              {finalConverter: convertToInt},
+		callsColumnName:             {finalConverter: convertToInt},
+		sharedBlksDirtiedColumnName: {finalConverter: convertToInt},
+		sharedBlksHitColumnName:     {finalConverter: convertToInt},
+		sharedBlksReadColumnName:    {finalConverter: convertToInt},
+		sharedBlksWrittenColumnName: {finalConverter: convertToInt},
+		tempBlksReadColumnName:      {finalConverter: convertToInt},
+		tempBlksWrittenColumnName:   {finalConverter: convertToInt},
+	}
+
+	pq := make(priorityQueue, 0)
+
+	for i, row := range rows {
+		queryID := row[dbAttributePrefix+queryidColumnName]
+
+		if queryID == nil {
+			// this should not happen, but in case
+			logger.Error("queryid is nil", zap.Any("atts", row))
+			mux.addPartial(errors.New("queryid is nil"))
+			continue
+		}
+
+		for columnName, info := range updatedOnly {
+			var valInAtts float64
+			_val := row[dbAttributePrefix+columnName]
+			if i, ok := _val.(int64); ok {
+				valInAtts = float64(i)
+			} else {
+				valInAtts = _val.(float64)
+			}
+			valInCache, exist := p.cache.Get(queryID.(string) + columnName)
+			valDelta := valInAtts
+			if exist {
+				valDelta = valInAtts - valInCache
+			}
+			finalValue := float64(0)
+			if valDelta > 0 {
+				p.cache.Add(queryID.(string)+columnName, valDelta)
+				finalValue = valDelta
+			}
+			if info.finalConverter != nil {
+				row[dbAttributePrefix+columnName] = info.finalConverter(finalValue)
+			} else {
+				row[dbAttributePrefix+columnName] = finalValue
+			}
+		}
+		if row[dbAttributePrefix+totalExecTimeColumnName] == 0.0 {
+			continue
+		}
+		item := item{
+			row:      row,
+			priority: row[dbAttributePrefix+totalExecTimeColumnName].(float64),
+			index:    i,
+		}
+		pq.Push(&item)
+	}
+
+	heap.Init(&pq)
+	explained := int64(0)
+	for pq.Len() > 0 && logRecords.Len() < int(topNQuery) {
+		item := heap.Pop(&pq).(*item)
+		record := logRecords.AppendEmpty()
+		record.SetTimestamp(timestamp)
+		record.SetEventName("top query")
+		if err := record.Attributes().FromRaw(item.row); err != nil {
+			mux.addPartial(err)
+			logger.Error("failed to read attributes from row", zap.Error(err))
+		}
+		query := item.row[QueryTextAttributeName].(string)
+		queryID := item.row[dbAttributePrefix+queryidColumnName].(string)
+		plan, ok := p.queryPlanCache.Get(queryID + "-plan")
+		if ok {
+			record.Attributes().PutStr(dbAttributePrefix+"query_plan", plan)
+		} else {
+			if explained < maxExplainEachInterval {
+				database := item.row[DatabaseAttributeName].(string)
+				dbClient, err := clientFactory.getClient(database)
+				if err != nil {
+					record.Attributes().PutStr(dbAttributePrefix+"query_plan", "")
+				} else {
+					plan, err := dbClient.explainQuery(query, queryID, logger)
+					if err != nil {
+						logger.Error("failed to explain query", zap.String("query", query), zap.Error(err))
+					}
+					record.Attributes().PutStr(dbAttributePrefix+"query_plan", plan)
+					// to avoid flood the error message. there are some internal queries meant to not be
+					// explained. we wait for the cache to expire and report the error again.
+					p.queryPlanCache.Add(queryID+"-plan", plan)
+					err = dbClient.Close()
+					if err != nil {
+						logger.Error("failed to close", zap.Error(err))
+					}
+				}
+				explained++
+			} else {
+				record.Attributes().PutStr(dbAttributePrefix+"query_plan", "")
+			}
+		}
+
+		record.Attributes().PutStr("db.system.name", "postgresql")
+		record.Body().SetStr("top query")
+	}
+}
+
 func (p *postgreSQLScraper) shutdown(_ context.Context) error {
 	if p.clientFactory != nil {
 		p.clientFactory.close()
@@ -203,6 +405,13 @@ func (p *postgreSQLScraper) recordDatabase(now pcommon.Timestamp, db string, r *
 		p.mb.RecordPostgresqlRollbacksDataPoint(now, stats.transactionRollback)
 		p.mb.RecordPostgresqlDeadlocksDataPoint(now, stats.deadlocks)
 		p.mb.RecordPostgresqlTempFilesDataPoint(now, stats.tempFiles)
+		p.mb.RecordPostgresqlTupUpdatedDataPoint(now, stats.tupUpdated)
+		p.mb.RecordPostgresqlTupReturnedDataPoint(now, stats.tupReturned)
+		p.mb.RecordPostgresqlTupFetchedDataPoint(now, stats.tupFetched)
+		p.mb.RecordPostgresqlTupInsertedDataPoint(now, stats.tupInserted)
+		p.mb.RecordPostgresqlTupDeletedDataPoint(now, stats.tupDeleted)
+		p.mb.RecordPostgresqlBlksHitDataPoint(now, stats.blksHit)
+		p.mb.RecordPostgresqlBlksReadDataPoint(now, stats.blksRead)
 	}
 	rb := p.mb.NewResourceBuilder()
 	rb.SetPostgresqlDatabaseName(db)
@@ -299,9 +508,13 @@ func (p *postgreSQLScraper) collectBGWriterStats(
 	p.mb.RecordPostgresqlBgwriterBuffersAllocatedDataPoint(now, bgStats.buffersAllocated)
 
 	p.mb.RecordPostgresqlBgwriterBuffersWritesDataPoint(now, bgStats.bgWrites, metadata.AttributeBgBufferSourceBgwriter)
-	p.mb.RecordPostgresqlBgwriterBuffersWritesDataPoint(now, bgStats.bufferBackendWrites, metadata.AttributeBgBufferSourceBackend)
+	if bgStats.bufferBackendWrites >= 0 {
+		p.mb.RecordPostgresqlBgwriterBuffersWritesDataPoint(now, bgStats.bufferBackendWrites, metadata.AttributeBgBufferSourceBackend)
+	}
 	p.mb.RecordPostgresqlBgwriterBuffersWritesDataPoint(now, bgStats.bufferCheckpoints, metadata.AttributeBgBufferSourceCheckpoints)
-	p.mb.RecordPostgresqlBgwriterBuffersWritesDataPoint(now, bgStats.bufferFsyncWrites, metadata.AttributeBgBufferSourceBackendFsync)
+	if bgStats.bufferFsyncWrites >= 0 {
+		p.mb.RecordPostgresqlBgwriterBuffersWritesDataPoint(now, bgStats.bufferFsyncWrites, metadata.AttributeBgBufferSourceBackendFsync)
+	}
 
 	p.mb.RecordPostgresqlBgwriterCheckpointCountDataPoint(now, bgStats.checkpointsReq, metadata.AttributeBgCheckpointTypeRequested)
 	p.mb.RecordPostgresqlBgwriterCheckpointCountDataPoint(now, bgStats.checkpointsScheduled, metadata.AttributeBgCheckpointTypeScheduled)
@@ -457,4 +670,43 @@ func (p *postgreSQLScraper) retrieveBackends(
 	r.Lock()
 	r.activityMap = activityByDB
 	r.Unlock()
+}
+
+// reference: https://pkg.go.dev/container/heap#example-package-priorityQueue
+
+type item struct {
+	row      map[string]any
+	priority float64
+	index    int
+}
+
+type priorityQueue []*item
+
+func (pq priorityQueue) Len() int { return len(pq) }
+
+func (pq priorityQueue) Less(i, j int) bool {
+	return pq[i].priority > pq[j].priority
+}
+
+func (pq priorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].index = i
+	pq[j].index = j
+}
+
+func (pq *priorityQueue) Push(x any) {
+	n := len(*pq)
+	item := x.(*item)
+	item.index = n
+	*pq = append(*pq, item)
+}
+
+func (pq *priorityQueue) Pop() any {
+	old := *pq
+	n := len(old)
+	item := old[n-1]
+	old[n-1] = nil  // don't stop the GC from reclaiming the item eventually
+	item.index = -1 // for safety
+	*pq = old[0 : n-1]
+	return item
 }

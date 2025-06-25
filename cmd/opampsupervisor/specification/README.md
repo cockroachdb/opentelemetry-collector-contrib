@@ -102,6 +102,10 @@ capabilities:
   # the Server.
   reports_own_logs: # true if unspecified
   
+  # The Collector will report own traces to the destination specified by
+  # the Server.
+  reports_own_traces: # true if unspecified
+  
   # The Collector will accept connections settings for exporters
   # from the Server.
   accepts_other_connection_settings: # false if unspecified
@@ -126,6 +130,9 @@ agent:
   # The interval on which the Collector checks to see if it's been orphaned.
   orphan_detection_interval: 5s
 
+  # The maximum wait duration for retrieving bootstrapping information from the agent 
+  bootstrap_timeout: 3s
+
   # Extra command line flags to pass to the Collector executable.
   args:
 
@@ -135,9 +142,10 @@ agent:
   # Optional user name to drop the privileges to when running the
   # Collector process.
   run_as: myuser
-  # Path to optional local Collector config file to be merged with the
+  # Path to optional local Collector config files to be merged with the
   # config provided by the OpAMP server.
-  config_file: /etc/otelcol/config.yaml
+  config_files: 
+    - /etc/otelcol/config.yaml
   # Optional directories that are allowed to be read/written by the
   # Collector.
   # If unspecified then NO access to the filesystem is allowed.
@@ -157,15 +165,97 @@ agent:
       client.id: "01HWWSK84BMT7J45663MBJMTPJ"
     non_identifying_attributes:
       custom.attribute: "custom-value"
-      
+
+  # The port the Supervisor will start its OpAmp server on and the Collector's 
+  # OpAmp extension will connect to
+  opamp_server_port: 
+
+# Supervisor's internal telemetry settings.
+telemetry:
+  # Logs configuration.
+  logs:
+    # Minimum enabled logging level.
+    # Defaults to info.
+    level: debug
+    # URLs or file paths to write logging output to.
+    # Defaults to stderr.
+    output_paths:
+      - stderr
+      - supervisor.log
+    # Log processors to emit logs.
+    processors:
+      - batch:
+          exporter:
+            otlp:
+              protocol: http/protobuf
+              endpoint: https://backend:4318
+  # Metrics configuration.
+  metrics:
+    # Verbosity of the metrics output.
+    level: detailed
+    # Metric readers to emit metrics.
+    readers:
+      - periodic:
+          exporter:
+            otlp:
+              protocol: http/protobuf
+              endpoint: https://backend:4318
+  # Traces configuration.
+  traces:
+    # Verbosity of the spans emitted.
+    level: detailed
+    # Enabled context propagators.
+    propagators:
+      - tracecontext
+    # Span processors to emit spans.
+    processors:
+      - batch:
+          exporter:
+            otlp:
+              protocol: http/protobuf
+              endpoint: https://backend:4318
+  # Resource attributes.
+  resource:
+    service.namespace: otel-demo
+
 ```
+
+**Note:**
+
+Please be aware that when using the `.agent.config_files` parameter,
+the configuration files specified are applied after the configuration from the OpAMP server.
+After the configuration files, arguments present in `.agent.args` are passed to the executable binary.
+The environmanet variables specified in `.agent.env` are set in the collector process environment.
+
+The following configuration:
+
+```yaml
+agent:
+  executable: ./otel-binary
+  config_files: 
+    - './custom-config.yaml'
+    - './another-custom-config.yaml'
+  args:
+    - '--feature-gates exporter.datadogexporter.UseLogsAgentExporter,exporter.datadogexporter.metricexportnativeclient'
+  env:
+    HOME: '/dev/home'
+    GO_HOME: '~/go'
+```
+
+results to the following startup parameters for the collector process:
+
+```shell
+./otel-binary --config opamp-config.yaml --config custom-config.yaml --config another-custom-config.yaml --feature-gates exporter.datadogexporter.UseLogsAgentExporter,exporter.datadogexporter.metricexportnativeclient
+```
+
+In case of conflicting values in the configuration files, the latest applied value takes precedence.
 
 ### Operation When OpAMP Server is Unavailable
 
 When the supervisor cannot connect to the OpAMP server, the collector will
-be run with the last known configuration, or with a "noop" configuration 
-if no previous configuration is persisted. The supervisor will continually 
-attempt to reconnect to the OpAMP server with exponential backoff.
+be run with the last known configuration if a previous configuration is persisted.
+If no previous configuration has been persisted, the collector does not run.
+The supervisor will continually attempt to reconnect to the OpAMP server with exponential backoff.
 
 ### Executing Collector
 
@@ -200,6 +290,10 @@ The Supervisor receives [*Remote
 Configuration*](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md#configuration)
 from the OpAMP Backend, merges it with an optional local config file and
 writes it to the Collector's config file, then restarts the Collector.
+
+If the remote configuration from the OpAMP Backend contains an empty config map,
+the collector will be stopped and will not be run again until a non-empty config map
+is received from the OpAMP Backend.
 
 In the future once config file watching is implemented the Collector can
 reload the config without the need for the Supervisor to restart the
@@ -241,13 +335,13 @@ configuration.
 To overcome this problem the Supervisor starts the Collector with an
 "noop" configuration that collects nothing but allows the opamp
 extension to be started. The "noop" configuration is a single pipeline
-with an OTLP receiver that listens on a random port and a debug
-exporter, and the opamp extension. The purpose of the "noop"
-configuration is to make sure the Collector starts and the opamp
-extension communicates with the Supervisor.
+with an nop receiver, a nop exporter, and the opamp extension. 
+The purpose of the "noop" configuration is to make sure the Collector starts 
+and the opamp extension communicates with the Supervisor. The Collector is stopped
+after the AgentDescription is received from the Collector.
 
 Once the initial Collector launch is successful and the remote
-configuration is received by the Supervisor the Supervisor restarts the
+configuration is received by the Supervisor the Supervisor starts the
 Collector with the new config. The new config is also cached by the
 Supervisor in a local file, so that subsequent restarts no longer need
 to start the Collector using the "noop" configuration. Caching of the
@@ -448,7 +542,7 @@ extensions:
 The extension uses an OpAMP connection to the Supervisor when used with
 the Supervisor model.
 
-The extensions' configuration cannot be overridden by the remote
+The extension's configuration cannot be overridden by the remote
 configuration.
 
 The same extension can be used to connect directly to the OpAMP Server,

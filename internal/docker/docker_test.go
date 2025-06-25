@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	dtypes "github.com/docker/docker/api/types"
+	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -62,8 +62,7 @@ func TestWatchingTimeouts(t *testing.T) {
 	shouldHaveTaken := time.Now().Add(100 * time.Millisecond).UnixNano()
 
 	err = cli.LoadContainerList(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), expectedError)
+	assert.ErrorContains(t, err, expectedError)
 	observed, logs := observer.New(zapcore.WarnLevel)
 	cli, err = NewDockerClient(config, zap.New(observed))
 	assert.NotNil(t, cli)
@@ -72,7 +71,7 @@ func TestWatchingTimeouts(t *testing.T) {
 	cnt, ofInterest := cli.inspectedContainerIsOfInterest(context.Background(), "SomeContainerId")
 	assert.False(t, ofInterest)
 	assert.Nil(t, cnt)
-	assert.Equal(t, 1, len(logs.All()))
+	assert.Len(t, logs.All(), 1)
 	for _, l := range logs.All() {
 		assert.Contains(t, l.ContextMap()["error"], expectedError)
 	}
@@ -111,8 +110,8 @@ func TestFetchingTimeouts(t *testing.T) {
 	statsJSON, err := cli.FetchContainerStatsAsJSON(
 		context.Background(),
 		Container{
-			ContainerJSON: &dtypes.ContainerJSON{
-				ContainerJSONBase: &dtypes.ContainerJSONBase{
+			ContainerJSON: &ctypes.InspectResponse{
+				ContainerJSONBase: &ctypes.ContainerJSONBase{
 					ID: "notARealContainerId",
 				},
 			},
@@ -120,11 +119,10 @@ func TestFetchingTimeouts(t *testing.T) {
 	)
 
 	assert.Nil(t, statsJSON)
-	require.Error(t, err)
 
-	assert.Contains(t, err.Error(), expectedError)
+	assert.ErrorContains(t, err, expectedError)
 
-	assert.Equal(t, 1, len(logs.All()))
+	assert.Len(t, logs.All(), 1)
 	for _, l := range logs.All() {
 		assert.Contains(t, l.ContextMap()["error"], expectedError)
 	}
@@ -133,7 +131,6 @@ func TestFetchingTimeouts(t *testing.T) {
 		t, time.Now().UnixNano(), shouldHaveTaken,
 		"Client timeouts don't appear to have been exercised.",
 	)
-
 }
 
 func TestToStatsJSONErrorHandling(t *testing.T) {
@@ -152,15 +149,15 @@ func TestToStatsJSONErrorHandling(t *testing.T) {
 	assert.NoError(t, err)
 
 	dc := &Container{
-		ContainerJSON: &dtypes.ContainerJSON{
-			ContainerJSONBase: &dtypes.ContainerJSONBase{
+		ContainerJSON: &ctypes.InspectResponse{
+			ContainerJSONBase: &ctypes.ContainerJSONBase{
 				ID: "notARealContainerId",
 			},
 		},
 	}
 
 	statsJSON, err := cli.toStatsJSON(
-		dtypes.ContainerStats{
+		ctypes.StatsResponseReader{
 			Body: io.NopCloser(strings.NewReader("")),
 		}, dc,
 	)
@@ -168,7 +165,7 @@ func TestToStatsJSONErrorHandling(t *testing.T) {
 	assert.Equal(t, io.EOF, err)
 
 	statsJSON, err = cli.toStatsJSON(
-		dtypes.ContainerStats{
+		ctypes.StatsResponseReader{
 			Body: io.NopCloser(strings.NewReader("{\"Networks\": 123}")),
 		}, dc,
 	)
@@ -184,7 +181,7 @@ func TestEventLoopHandlesError(t *testing.T) {
 			wg.Done()
 		}
 		_, err := w.Write([]byte{})
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}))
 	defer srv.Close()
 

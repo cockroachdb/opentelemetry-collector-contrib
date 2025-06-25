@@ -6,19 +6,19 @@ package prometheusreceiver // import "github.com/open-telemetry/opentelemetry-co
 import (
 	"errors"
 	"fmt"
-	"net/url"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	commonconfig "github.com/prometheus/common/config"
 	promconfig "github.com/prometheus/prometheus/config"
-	promHTTP "github.com/prometheus/prometheus/discovery/http"
 	"github.com/prometheus/prometheus/discovery/kubernetes"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/confmap"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/targetallocator"
 )
 
 // Config defines configuration for Prometheus receiver.
@@ -37,33 +37,24 @@ type Config struct {
 	// ReportExtraScrapeMetrics - enables reporting of additional metrics for Prometheus client like scrape_body_size_bytes
 	ReportExtraScrapeMetrics bool `mapstructure:"report_extra_scrape_metrics"`
 
-	TargetAllocator *TargetAllocator `mapstructure:"target_allocator"`
+	TargetAllocator *targetallocator.Config `mapstructure:"target_allocator"`
+
+	//  APIServer has the settings to enable the receiver to host the Prometheus API
+	// server in agent mode. This allows the user to call the endpoint to get
+	// the config, service discovery, and targets for debugging purposes.
+	APIServer *APIServer `mapstructure:"api_server"`
 }
 
 // Validate checks the receiver configuration is valid.
 func (cfg *Config) Validate() error {
-	if (cfg.PrometheusConfig == nil || len(cfg.PrometheusConfig.ScrapeConfigs) == 0) && cfg.TargetAllocator == nil {
+	if !cfg.PrometheusConfig.ContainsScrapeConfigs() && cfg.TargetAllocator == nil {
 		return errors.New("no Prometheus scrape_configs or target_allocator set")
 	}
-	return nil
-}
 
-type TargetAllocator struct {
-	confighttp.ClientConfig `mapstructure:",squash"`
-	Interval                time.Duration         `mapstructure:"interval"`
-	CollectorID             string                `mapstructure:"collector_id"`
-	HTTPSDConfig            *PromHTTPSDConfig     `mapstructure:"http_sd_config"`
-	HTTPScrapeConfig        *PromHTTPClientConfig `mapstructure:"http_scrape_config"`
-}
-
-func (cfg *TargetAllocator) Validate() error {
-	// ensure valid endpoint
-	if _, err := url.ParseRequestURI(cfg.Endpoint); err != nil {
-		return fmt.Errorf("TargetAllocator endpoint is not valid: %s", cfg.Endpoint)
-	}
-	// ensure valid collectorID without variables
-	if cfg.CollectorID == "" || strings.Contains(cfg.CollectorID, "${") {
-		return fmt.Errorf("CollectorID is not a valid ID")
+	if cfg.APIServer != nil {
+		if err := cfg.APIServer.Validate(); err != nil {
+			return fmt.Errorf("invalid API server configuration settings: %w", err)
+		}
 	}
 
 	return nil
@@ -75,12 +66,21 @@ type PromConfig promconfig.Config
 
 var _ confmap.Unmarshaler = (*PromConfig)(nil)
 
+// ContainsScrapeConfigs returns true if the Prometheus config contains any scrape configs.
+func (cfg *PromConfig) ContainsScrapeConfigs() bool {
+	return cfg != nil && (len(cfg.ScrapeConfigs) > 0 || len(cfg.ScrapeConfigFiles) > 0)
+}
+
+func (cfg *PromConfig) Reload() error {
+	return reloadPromConfig(cfg, cfg)
+}
+
 func (cfg *PromConfig) Unmarshal(componentParser *confmap.Conf) error {
 	cfgMap := componentParser.ToStringMap()
 	if len(cfgMap) == 0 {
 		return nil
 	}
-	return unmarshalYAML(cfgMap, (*promconfig.Config)(cfg))
+	return reloadPromConfig(cfg, cfgMap)
 }
 
 func (cfg *PromConfig) Validate() error {
@@ -110,69 +110,50 @@ func (cfg *PromConfig) Validate() error {
 		return fmt.Errorf("unsupported features:\n\t%s", strings.Join(unsupportedFeatures, "\n\t"))
 	}
 
-	for _, sc := range cfg.ScrapeConfigs {
-		if err := validateHTTPClientConfig(&sc.HTTPClientConfig); err != nil {
-			return err
+	if cfg.ContainsScrapeConfigs() {
+		scrapeConfigs, err := (*promconfig.Config)(cfg).GetScrapeConfigs()
+		if err != nil {
+			return fmt.Errorf("failed to get scrape configs: %w", err)
 		}
 
-		for _, c := range sc.ServiceDiscoveryConfigs {
-			if c, ok := c.(*kubernetes.SDConfig); ok {
-				if err := validateHTTPClientConfig(&c.HTTPClientConfig); err != nil {
-					return err
+		// Since Prometheus 3.0, the scrape manager started to fail scrapes that don't have proper
+		// Content-Type headers, but they provided an extra configuration option to fallback to the
+		// previous behavior. We need to make sure that this option is set for all scrape configs
+		// to avoid introducing a breaking change.
+		for _, sc := range scrapeConfigs {
+			if sc.ScrapeFallbackProtocol == "" {
+				sc.ScrapeFallbackProtocol = promconfig.PrometheusText0_0_4
+			}
+		}
+
+		for _, sc := range scrapeConfigs {
+			if err := validateHTTPClientConfig(&sc.HTTPClientConfig); err != nil {
+				return err
+			}
+
+			for _, c := range sc.ServiceDiscoveryConfigs {
+				if c, ok := c.(*kubernetes.SDConfig); ok {
+					if err := validateHTTPClientConfig(&c.HTTPClientConfig); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
+
 	return nil
 }
 
-// PromHTTPSDConfig is a redeclaration of promHTTP.SDConfig because we need custom unmarshaling
-// as prometheus "config" uses `yaml` tags.
-type PromHTTPSDConfig promHTTP.SDConfig
-
-var _ confmap.Unmarshaler = (*PromHTTPSDConfig)(nil)
-
-func (cfg *PromHTTPSDConfig) Unmarshal(componentParser *confmap.Conf) error {
-	cfgMap := componentParser.ToStringMap()
-	if len(cfgMap) == 0 {
-		return nil
-	}
-	cfgMap["url"] = "http://placeholder" // we have to set it as else marshaling will fail
-	return unmarshalYAML(cfgMap, (*promHTTP.SDConfig)(cfg))
-}
-
-type PromHTTPClientConfig commonconfig.HTTPClientConfig
-
-var _ confmap.Unmarshaler = (*PromHTTPClientConfig)(nil)
-
-func (cfg *PromHTTPClientConfig) Unmarshal(componentParser *confmap.Conf) error {
-	cfgMap := componentParser.ToStringMap()
-	if len(cfgMap) == 0 {
-		return nil
-	}
-	return unmarshalYAML(cfgMap, (*commonconfig.HTTPClientConfig)(cfg))
-}
-
-func (cfg *PromHTTPClientConfig) Validate() error {
-	httpCfg := (*commonconfig.HTTPClientConfig)(cfg)
-	if err := validateHTTPClientConfig(httpCfg); err != nil {
-		return err
-	}
-	// Prometheus UnmarshalYaml implementation by default calls Validate,
-	// but it is safer to do it here as well.
-	return httpCfg.Validate()
-}
-
-func unmarshalYAML(in map[string]any, out any) error {
-	yamlOut, err := yaml.Marshal(in)
+func reloadPromConfig(dst *PromConfig, src any) error {
+	yamlOut, err := yaml.Marshal(src)
 	if err != nil {
 		return fmt.Errorf("prometheus receiver: failed to marshal config to yaml: %w", err)
 	}
-
-	err = yaml.UnmarshalStrict(yamlOut, out)
+	newCfg, err := promconfig.Load(string(yamlOut), slog.Default())
 	if err != nil {
 		return fmt.Errorf("prometheus receiver: failed to unmarshal yaml to prometheus config object: %w", err)
 	}
+	*dst = PromConfig(*newCfg)
 	return nil
 }
 
@@ -187,7 +168,6 @@ func validateHTTPClientConfig(cfg *commonconfig.HTTPClientConfig) error {
 		return err
 	}
 	return nil
-
 }
 
 func checkFile(fn string) error {
@@ -206,5 +186,22 @@ func checkTLSConfig(tlsConfig commonconfig.TLSConfig) error {
 	if err := checkFile(tlsConfig.KeyFile); err != nil {
 		return fmt.Errorf("error checking client key file %q: %w", tlsConfig.KeyFile, err)
 	}
+	return nil
+}
+
+type APIServer struct {
+	Enabled      bool                    `mapstructure:"enabled"`
+	ServerConfig confighttp.ServerConfig `mapstructure:"server_config"`
+}
+
+func (cfg *APIServer) Validate() error {
+	if !cfg.Enabled {
+		return nil
+	}
+
+	if cfg.ServerConfig.Endpoint == "" {
+		return errors.New("if api_server is enabled, it requires a non-empty server_config endpoint")
+	}
+
 	return nil
 }

@@ -28,6 +28,7 @@ type ConnectionConfig struct {
 	ConnectionTimeout          time.Duration           `mapstructure:"connection_timeout"`
 	Heartbeat                  time.Duration           `mapstructure:"heartbeat"`
 	PublishConfirmationTimeout time.Duration           `mapstructure:"publish_confirmation_timeout"`
+	Name                       string                  `mapstructure:"name"`
 }
 
 type RoutingConfig struct {
@@ -37,6 +38,8 @@ type RoutingConfig struct {
 
 type AuthConfig struct {
 	Plain PlainAuth `mapstructure:"plain"`
+	// prevent unkeyed literal initialization
+	_ struct{}
 }
 
 type PlainAuth struct {

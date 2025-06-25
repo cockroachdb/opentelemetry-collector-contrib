@@ -8,30 +8,33 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
-	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger-idl/model/v1"
 	"github.com/klauspost/compress/zstd"
 	splunksapm "github.com/signalfx/sapm-proto/gen"
 	"github.com/signalfx/sapm-proto/sapmprotocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
+	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receivertest"
-	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
+	conventions "go.opentelemetry.io/otel/semconv/v1.27.0"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sapmreceiver/internal/metadata"
 )
 
 func expectedTraceData(t1, t2, t3 time.Time) ptrace.Traces {
@@ -42,7 +45,7 @@ func expectedTraceData(t1, t2, t3 time.Time) ptrace.Traces {
 
 	traces := ptrace.NewTraces()
 	rs := traces.ResourceSpans().AppendEmpty()
-	rs.Resource().Attributes().PutStr(conventions.AttributeServiceName, "issaTest")
+	rs.Resource().Attributes().PutStr(string(conventions.ServiceNameKey), "issaTest")
 	rs.Resource().Attributes().PutBool("bool", true)
 	rs.Resource().Attributes().PutStr("string", "yes")
 	rs.Resource().Attributes().PutInt("int64", 10000000)
@@ -93,8 +96,8 @@ func grpcFixture(t1 time.Time) *model.Batch {
 				StartTime:     t1,
 				Duration:      10 * time.Minute,
 				Tags: []model.KeyValue{
-					model.String(conventions.OtelStatusDescription, "Stale indices"),
-					model.String(conventions.OtelStatusCode, "ERROR"),
+					model.String(string(conventions.OTelStatusDescriptionKey), "Stale indices"),
+					model.String(string(conventions.OTelStatusCodeKey), "ERROR"),
 					model.Bool("error", true),
 				},
 				References: []model.SpanRef{
@@ -112,8 +115,8 @@ func grpcFixture(t1 time.Time) *model.Batch {
 				StartTime:     t1.Add(10 * time.Minute),
 				Duration:      2 * time.Second,
 				Tags: []model.KeyValue{
-					model.String(conventions.OtelStatusDescription, "Frontend crash"),
-					model.String(conventions.OtelStatusCode, "ERROR"),
+					model.String(string(conventions.OTelStatusDescriptionKey), "Frontend crash"),
+					model.String(string(conventions.OTelStatusCodeKey), "ERROR"),
 					model.Bool("error", true),
 				},
 			},
@@ -242,17 +245,22 @@ func compressZstd(reqBytes []byte) ([]byte, error) {
 	return buff.Bytes(), nil
 }
 
-func setupReceiver(t *testing.T, config *Config, sink *consumertest.TracesSink) receiver.Traces {
-	params := receivertest.NewNopSettings()
-	params.TelemetrySettings.ReportStatus = func(event *component.StatusEvent) {
-		require.NoError(t, event.Err())
-	}
+func setupReceiver(t *testing.T, config *Config, sink consumer.Traces) receiver.Traces {
+	params := receivertest.NewNopSettings(metadata.Type)
 	sr, err := newReceiver(params, config, sink)
 	assert.NoError(t, err, "should not have failed to create the SAPM receiver")
 	t.Log("Starting")
 
-	require.NoError(t, sr.Start(context.Background(), componenttest.NewNopHost()), "should not have failed to start trace reception")
-	require.NoError(t, sr.Start(context.Background(), componenttest.NewNopHost()), "should not fail to start log on second Start call")
+	require.NoError(t, sr.Start(context.Background(), &nopHost{
+		reportFunc: func(event *componentstatus.Event) {
+			require.NoError(t, event.Err())
+		},
+	}), "should not have failed to start trace reception")
+	require.NoError(t, sr.Start(context.Background(), &nopHost{
+		reportFunc: func(event *componentstatus.Event) {
+			require.NoError(t, event.Err())
+		},
+	}), "should not fail to start log on second Start call")
 
 	t.Log("Trace Reception Started")
 	return sr
@@ -310,7 +318,7 @@ func TestReception(t *testing.T) {
 				config: &Config{
 					ServerConfig: confighttp.ServerConfig{
 						Endpoint: tlsAddress,
-						TLSSetting: &configtls.ServerConfig{
+						TLS: &configtls.ServerConfig{
 							Config: configtls.Config{
 								CAFile:   "./testdata/ca.crt",
 								CertFile: "./testdata/server.crt",
@@ -328,7 +336,6 @@ func TestReception(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			sink := new(consumertest.TracesSink)
 			sr := setupReceiver(t, tt.args.config, sink)
 			defer func() {
@@ -345,83 +352,64 @@ func TestReception(t *testing.T) {
 
 			// retrieve received traces
 			got := sink.AllTraces()
-			assert.Equal(t, 1, len(got))
+			assert.Len(t, got, 1)
 
 			// compare what we got to what we wanted
 			t.Log("Comparing expected data to trace data")
-			assert.EqualValues(t, tt.want, got[0])
+			assert.Equal(t, tt.want, got[0])
 		})
 	}
 }
 
-func TestAccessTokenPassthrough(t *testing.T) {
+func TestStatusCode(t *testing.T) {
+	tlsAddress := testutil.GetAvailableLocalAddress(t)
+
 	tests := []struct {
-		name                   string
-		accessTokenPassthrough bool
-		token                  string
+		name           string
+		err            error
+		expectedStatus int
 	}{
 		{
-			name:                   "no passthrough and no token",
-			accessTokenPassthrough: false,
-			token:                  "",
+			name:           "non-permanent error",
+			err:            errors.New("non-permanent error"),
+			expectedStatus: http.StatusServiceUnavailable,
 		},
 		{
-			name:                   "no passthrough and token",
-			accessTokenPassthrough: false,
-			token:                  "MyAccessToken",
-		},
-		{
-			name:                   "passthrough and no token",
-			accessTokenPassthrough: true,
-			token:                  "",
-		},
-		{
-			name:                   "passthrough and token",
-			accessTokenPassthrough: true,
-			token:                  "MyAccessToken",
+			name:           "permanent error",
+			err:            consumererror.NewPermanent(errors.New("non-permanent error")),
+			expectedStatus: http.StatusBadRequest,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			config := &Config{
 				ServerConfig: confighttp.ServerConfig{
-					Endpoint: "0.0.0.0:7226",
-				},
-				AccessTokenPassthroughConfig: splunk.AccessTokenPassthroughConfig{
-					AccessTokenPassthrough: tt.accessTokenPassthrough,
+					Endpoint: tlsAddress,
 				},
 			}
-
+			sr := setupReceiver(t, config, consumertest.NewErr(test.err))
 			sapm := &splunksapm.PostSpansRequest{
 				Batches: []*model.Batch{grpcFixture(time.Now().UTC())},
 			}
-
-			sink := new(consumertest.TracesSink)
-			sr := setupReceiver(t, config, sink)
-			defer func() {
-				require.NoError(t, sr.Shutdown(context.Background()))
-			}()
-
 			var resp *http.Response
-			resp, err := sendSapm(config.Endpoint, sapm, "gzip", false, tt.token)
+			resp, err := sendSapm(config.Endpoint, sapm, "", false, "")
 			require.NoErrorf(t, err, "should not have failed when sending sapm %v", err)
-			assert.Equal(t, 200, resp.StatusCode)
-			assert.NoError(t, resp.Body.Close())
-
-			got := sink.AllTraces()
-			assert.Equal(t, 1, len(got))
-
-			received := got[0].ResourceSpans()
-			for i := 0; i < received.Len(); i++ {
-				rspan := received.At(i)
-				attrs := rspan.Resource().Attributes()
-				amap, contains := attrs.Get("com.splunk.signalfx.access_token")
-				if tt.accessTokenPassthrough && tt.token != "" {
-					assert.Equal(t, tt.token, amap.Str())
-				} else {
-					assert.False(t, contains)
-				}
-			}
+			assert.Equal(t, test.expectedStatus, resp.StatusCode)
+			require.NoError(t, sr.Shutdown(context.Background()))
 		})
 	}
+}
+
+var _ componentstatus.Reporter = (*nopHost)(nil)
+
+type nopHost struct {
+	reportFunc func(event *componentstatus.Event)
+}
+
+func (nh *nopHost) GetExtensions() map[component.ID]component.Component {
+	return nil
+}
+
+func (nh *nopHost) Report(event *componentstatus.Event) {
+	nh.reportFunc(event)
 }

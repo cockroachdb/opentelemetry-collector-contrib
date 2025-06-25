@@ -6,14 +6,12 @@ package otelarrowexporter // import "github.com/open-telemetry/opentelemetry-col
 import (
 	"context"
 	"errors"
-	"fmt"
-	"runtime"
 	"time"
 
-	arrowPkg "github.com/apache/arrow/go/v16/arrow"
 	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configcompression"
+	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
@@ -36,6 +34,18 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/otelarrow/compression/zstd"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/otelarrow/netstats"
 )
+
+type exp interface {
+	getSettings() exporter.Settings
+	getConfig() component.Config
+
+	start(context.Context, component.Host) error
+	shutdown(context.Context) error
+
+	pushTraces(context.Context, ptrace.Traces) error
+	pushMetrics(context.Context, pmetric.Metrics) error
+	pushLogs(context.Context, plog.Logs) error
+}
 
 type baseExporter struct {
 	// Input configuration.
@@ -60,29 +70,17 @@ type baseExporter struct {
 	streamClientFactory streamClientFactory
 }
 
+var _ exp = (*baseExporter)(nil)
+
 type streamClientFactory func(conn *grpc.ClientConn) arrow.StreamClientFunc
 
 // Crete new exporter and start it. The exporter will begin connecting but
 // this function may return before the connection is established.
-func newExporter(cfg component.Config, set exporter.Settings, streamClientFactory streamClientFactory) (*baseExporter, error) {
+func newExporter(cfg component.Config, set exporter.Settings, streamClientFactory streamClientFactory, userAgent string, netReporter *netstats.NetworkReporter) (exp, error) {
 	oCfg := cfg.(*Config)
 
 	if oCfg.Endpoint == "" {
 		return nil, errors.New("OTLP exporter config requires an Endpoint")
-	}
-
-	netReporter, err := netstats.NewExporterNetworkReporter(set)
-	if err != nil {
-		return nil, err
-	}
-	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
-		set.BuildInfo.Description, set.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
-
-	if !oCfg.Arrow.Disabled {
-		// Ignoring an error because Validate() was called.
-		_ = zstd.SetEncoderConfig(oCfg.Arrow.Zstd)
-
-		userAgent += fmt.Sprintf(" ApacheArrow/%s (NumStreams/%d)", arrowPkg.PkgVersion, oCfg.Arrow.NumStreams)
 	}
 
 	return &baseExporter{
@@ -94,29 +92,45 @@ func newExporter(cfg component.Config, set exporter.Settings, streamClientFactor
 	}, nil
 }
 
+func (e *baseExporter) getSettings() exporter.Settings {
+	return e.settings
+}
+
+func (e *baseExporter) getConfig() component.Config {
+	return e.config
+}
+
+func (e *baseExporter) setMetadata(md metadata.MD) {
+	e.metadata = metadata.Join(e.metadata, md)
+}
+
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
 func (e *baseExporter) start(ctx context.Context, host component.Host) (err error) {
-	dialOpts := []grpc.DialOption{
-		grpc.WithUserAgent(e.userAgent),
+	dialOpts := []configgrpc.ToClientConnOption{
+		configgrpc.WithGrpcDialOption(grpc.WithUserAgent(e.userAgent)),
 	}
 	if e.netReporter != nil {
-		dialOpts = append(dialOpts, grpc.WithStatsHandler(e.netReporter.Handler()))
+		dialOpts = append(dialOpts, configgrpc.WithGrpcDialOption(grpc.WithStatsHandler(e.netReporter.Handler())))
 	}
-	dialOpts = append(dialOpts, e.config.UserDialOptions...)
-	if e.clientConn, err = e.config.ClientConfig.ToClientConn(ctx, host, e.settings.TelemetrySettings, dialOpts...); err != nil {
+	for _, opt := range e.config.UserDialOptions {
+		dialOpts = append(dialOpts, configgrpc.WithGrpcDialOption(opt))
+	}
+
+	if e.clientConn, err = e.config.ToClientConn(ctx, host, e.settings.TelemetrySettings, dialOpts...); err != nil {
 		return err
 	}
 	e.traceExporter = ptraceotlp.NewGRPCClient(e.clientConn)
 	e.metricExporter = pmetricotlp.NewGRPCClient(e.clientConn)
 	e.logExporter = plogotlp.NewGRPCClient(e.clientConn)
 	headers := map[string]string{}
-	for k, v := range e.config.ClientConfig.Headers {
+	for k, v := range e.config.Headers {
 		headers[k] = string(v)
 	}
-	e.metadata = metadata.New(headers)
+	headerMetadata := metadata.New(headers)
+	e.metadata = metadata.Join(e.metadata, headerMetadata)
 	e.callOptions = []grpc.CallOption{
-		grpc.WaitForReady(e.config.ClientConfig.WaitForReady),
+		grpc.WaitForReady(e.config.WaitForReady),
 	}
 
 	if !e.config.Arrow.Disabled {
@@ -124,9 +138,9 @@ func (e *baseExporter) start(ctx context.Context, host component.Host) (err erro
 		ctx := e.enhanceContext(context.Background())
 
 		var perRPCCreds credentials.PerRPCCredentials
-		if e.config.ClientConfig.Auth != nil {
+		if e.config.Auth != nil {
 			// Get the auth extension, we'll use it to enrich the request context.
-			authClient, err := e.config.ClientConfig.Auth.GetClientAuthenticator(ctx, host.GetExtensions())
+			authClient, err := e.config.Auth.GetGRPCClientAuthenticator(ctx, host.GetExtensions())
 			if err != nil {
 				return err
 			}
@@ -141,7 +155,7 @@ func (e *baseExporter) start(ctx context.Context, host component.Host) (err erro
 
 		arrowCallOpts := e.callOptions
 
-		if e.config.ClientConfig.Compression == configcompression.TypeZstd {
+		if e.config.Compression == configcompression.TypeZstd {
 			// ignore the error below b/c Validate() was called
 			_ = zstd.SetEncoderConfig(e.config.Arrow.Zstd)
 			// use the configured compressor.
@@ -201,7 +215,7 @@ func (e *baseExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
 		return err
 	}
 	partialSuccess := resp.PartialSuccess()
-	if !(partialSuccess.ErrorMessage() == "" && partialSuccess.RejectedSpans() == 0) {
+	if partialSuccess.ErrorMessage() != "" || partialSuccess.RejectedSpans() != 0 {
 		// TODO: These should be counted, similar to dropped items.
 		e.settings.Logger.Warn("partial success",
 			zap.String("message", resp.PartialSuccess().ErrorMessage()),
@@ -223,7 +237,7 @@ func (e *baseExporter) pushMetrics(ctx context.Context, md pmetric.Metrics) erro
 		return err
 	}
 	partialSuccess := resp.PartialSuccess()
-	if !(partialSuccess.ErrorMessage() == "" && partialSuccess.RejectedDataPoints() == 0) {
+	if partialSuccess.ErrorMessage() != "" || partialSuccess.RejectedDataPoints() != 0 {
 		// TODO: These should be counted, similar to dropped items.
 		e.settings.Logger.Warn("partial success",
 			zap.String("message", resp.PartialSuccess().ErrorMessage()),
@@ -245,7 +259,7 @@ func (e *baseExporter) pushLogs(ctx context.Context, ld plog.Logs) error {
 		return err
 	}
 	partialSuccess := resp.PartialSuccess()
-	if !(partialSuccess.ErrorMessage() == "" && partialSuccess.RejectedLogRecords() == 0) {
+	if partialSuccess.ErrorMessage() != "" || partialSuccess.RejectedLogRecords() != 0 {
 		// TODO: These should be counted, similar to dropped items.
 		e.settings.Logger.Warn("partial success",
 			zap.String("message", resp.PartialSuccess().ErrorMessage()),

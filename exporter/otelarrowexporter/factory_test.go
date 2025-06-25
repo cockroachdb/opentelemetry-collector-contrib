@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/collector/exporter/exportertest"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/otelarrowexporter/internal/arrow"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/otelarrowexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/otelarrow/compression/zstd"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/otelarrow/testutil"
 )
@@ -31,34 +32,36 @@ func TestCreateDefaultConfig(t *testing.T) {
 	cfg := factory.CreateDefaultConfig()
 	assert.NotNil(t, cfg, "failed to create default config")
 	assert.NoError(t, componenttest.CheckConfigStruct(cfg))
-	ocfg, ok := factory.CreateDefaultConfig().(*Config)
-	assert.True(t, ok)
+	ocfg := factory.CreateDefaultConfig().(*Config)
 	assert.Equal(t, ocfg.RetryConfig, configretry.NewDefaultBackOffConfig())
-	assert.Equal(t, ocfg.QueueSettings, exporterhelper.NewDefaultQueueSettings())
-	assert.Equal(t, ocfg.TimeoutSettings, exporterhelper.NewDefaultTimeoutSettings())
-	assert.Equal(t, ocfg.Compression, configcompression.TypeZstd)
-	assert.Equal(t, ocfg.Arrow, ArrowConfig{
+
+	// We customize the queue/batch settings.
+	assert.NotEqual(t, ocfg.QueueSettings, exporterhelper.NewDefaultQueueConfig())
+
+	assert.Equal(t, ocfg.TimeoutSettings, exporterhelper.NewDefaultTimeoutConfig())
+	assert.Equal(t, configcompression.TypeZstd, ocfg.Compression)
+	assert.Equal(t, ArrowConfig{
 		Disabled:           false,
-		NumStreams:         runtime.NumCPU(),
-		MaxStreamLifetime:  time.Hour,
-		PayloadCompression: "",
+		NumStreams:         max(1, runtime.NumCPU()/2),
+		MaxStreamLifetime:  30 * time.Second,
+		PayloadCompression: "zstd",
 		Zstd:               zstd.DefaultEncoderConfig(),
 		Prioritizer:        arrow.DefaultPrioritizer,
-	})
+	}, ocfg.Arrow)
 }
 
-func TestCreateMetricsExporter(t *testing.T) {
+func TestCreateMetrics(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	cfg.ClientConfig.Endpoint = testutil.GetAvailableLocalAddress(t)
+	cfg.Endpoint = testutil.GetAvailableLocalAddress(t)
 
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateMetricsExporter(context.Background(), set, cfg)
-	require.Nil(t, err)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateMetrics(context.Background(), set, cfg)
+	require.NoError(t, err)
 	require.NotNil(t, oexp)
 }
 
-func TestCreateTracesExporter(t *testing.T) {
+func TestCreateTraces(t *testing.T) {
 	endpoint := testutil.GetAvailableLocalAddress(t)
 	tests := []struct {
 		name             string
@@ -80,7 +83,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Insecure: false,
 					},
 				},
@@ -160,7 +163,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Config: configtls.Config{
 							CAFile: filepath.Join("testdata", "test_cert.pem"),
 						},
@@ -173,7 +176,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: Config{
 				ClientConfig: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Config: configtls.Config{
 							CAFile: "nosuchfile",
 						},
@@ -187,11 +190,11 @@ func TestCreateTracesExporter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			factory := NewFactory()
-			set := exportertest.NewNopSettings()
+			set := exportertest.NewNopSettings(metadata.Type)
 			cfg := tt.config
-			consumer, err := factory.CreateTracesExporter(context.Background(), set, &cfg)
+			consumer, err := factory.CreateTraces(context.Background(), set, &cfg)
 			if tt.mustFailOnCreate {
-				assert.NotNil(t, err)
+				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
@@ -207,32 +210,32 @@ func TestCreateTracesExporter(t *testing.T) {
 			if err != nil {
 				// Since the endpoint of OTLP exporter doesn't actually exist,
 				// exporter may already stop because it cannot connect.
-				assert.Equal(t, err.Error(), "rpc error: code = Canceled desc = grpc: the client connection is closing")
+				assert.Equal(t, "rpc error: code = Canceled desc = grpc: the client connection is closing", err.Error())
 			}
 		})
 	}
 }
 
-func TestCreateLogsExporter(t *testing.T) {
+func TestCreateLogs(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	cfg.ClientConfig.Endpoint = testutil.GetAvailableLocalAddress(t)
+	cfg.Endpoint = testutil.GetAvailableLocalAddress(t)
 
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateLogsExporter(context.Background(), set, cfg)
-	require.Nil(t, err)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateLogs(context.Background(), set, cfg)
+	require.NoError(t, err)
 	require.NotNil(t, oexp)
 }
 
 func TestCreateArrowTracesExporter(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	cfg.ClientConfig.Endpoint = testutil.GetAvailableLocalAddress(t)
+	cfg.Endpoint = testutil.GetAvailableLocalAddress(t)
 	cfg.Arrow = ArrowConfig{
 		NumStreams: 1,
 	}
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
-	require.Nil(t, err)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateTraces(context.Background(), set, cfg)
+	require.NoError(t, err)
 	require.NotNil(t, oexp)
 }

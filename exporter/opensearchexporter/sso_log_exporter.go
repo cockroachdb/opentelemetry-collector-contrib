@@ -23,18 +23,14 @@ type logExporter struct {
 	telemetry    component.TelemetrySettings
 }
 
-func newLogExporter(cfg *Config, set exporter.Settings) (*logExporter, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
+func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
 	model := &encodeModel{
 		dedup:             cfg.Dedup,
 		dedot:             cfg.Dedot,
-		sso:               cfg.MappingsSettings.Mode == MappingSS4O.String(),
-		flattenAttributes: cfg.MappingsSettings.Mode == MappingFlattenAttributes.String(),
-		timestampField:    cfg.MappingsSettings.TimestampField,
-		unixTime:          cfg.MappingsSettings.UnixTimestamp,
+		sso:               cfg.Mode == MappingSS4O.String(),
+		flattenAttributes: cfg.Mode == MappingFlattenAttributes.String(),
+		timestampField:    cfg.TimestampField,
+		unixTime:          cfg.UnixTimestamp,
 		dataset:           cfg.Dataset,
 		namespace:         cfg.Namespace,
 	}
@@ -45,7 +41,7 @@ func newLogExporter(cfg *Config, set exporter.Settings) (*logExporter, error) {
 		bulkAction:   cfg.BulkAction,
 		httpSettings: cfg.ClientConfig,
 		model:        model,
-	}, nil
+	}
 }
 
 func (l *logExporter) Start(ctx context.Context, host component.Host) error {

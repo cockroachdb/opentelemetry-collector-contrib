@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -25,9 +26,21 @@ import (
 
 const (
 	queuesAPIResponseFile = "get_queues_response.json"
+	nodesAPIResponseFile  = "get_nodes_response.json"
 )
 
 func TestNewClient(t *testing.T) {
+	clientConfigNonexistentCA := confighttp.NewDefaultClientConfig()
+	clientConfigNonexistentCA.Endpoint = defaultEndpoint
+	clientConfigNonexistentCA.TLS = configtls.ClientConfig{
+		Config: configtls.Config{
+			CAFile: "/non/existent",
+		},
+	}
+
+	clientConfig := confighttp.NewDefaultClientConfig()
+	clientConfig.Endpoint = defaultEndpoint
+
 	testCase := []struct {
 		desc        string
 		cfg         *Config
@@ -39,14 +52,7 @@ func TestNewClient(t *testing.T) {
 		{
 			desc: "Invalid HTTP config",
 			cfg: &Config{
-				ClientConfig: confighttp.ClientConfig{
-					Endpoint: defaultEndpoint,
-					TLSSetting: configtls.ClientConfig{
-						Config: configtls.Config{
-							CAFile: "/non/existent",
-						},
-					},
-				},
+				ClientConfig: clientConfigNonexistentCA,
 			},
 			host:        componenttest.NewNopHost(),
 			settings:    componenttest.NewNopTelemetrySettings(),
@@ -56,10 +62,7 @@ func TestNewClient(t *testing.T) {
 		{
 			desc: "Valid Configuration",
 			cfg: &Config{
-				ClientConfig: confighttp.ClientConfig{
-					TLSSetting: configtls.ClientConfig{},
-					Endpoint:   defaultEndpoint,
-				},
+				ClientConfig: clientConfig,
 			},
 			host:        componenttest.NewNopHost(),
 			settings:    componenttest.NewNopTelemetrySettings(),
@@ -73,7 +76,7 @@ func TestNewClient(t *testing.T) {
 			ac, err := newClient(context.Background(), tc.cfg, tc.host, tc.settings, tc.logger)
 			if tc.expectError != nil {
 				require.Nil(t, ac)
-				require.Contains(t, err.Error(), tc.expectError.Error())
+				require.ErrorContains(t, err, tc.expectError.Error())
 			} else {
 				require.NoError(t, err)
 
@@ -117,7 +120,7 @@ func TestGetQueuesDetails(t *testing.T) {
 				// Setup test server
 				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					_, err := w.Write([]byte("{}"))
-					require.NoError(t, err)
+					assert.NoError(t, err)
 				}))
 				defer ts.Close()
 
@@ -125,7 +128,7 @@ func TestGetQueuesDetails(t *testing.T) {
 
 				clusters, err := tc.GetQueues(context.Background())
 				require.Nil(t, clusters)
-				require.Contains(t, err.Error(), "failed to decode response payload")
+				require.ErrorContains(t, err, "failed to decode response payload")
 			},
 		},
 		{
@@ -136,7 +139,7 @@ func TestGetQueuesDetails(t *testing.T) {
 				// Setup test server
 				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					_, err := w.Write(data)
-					require.NoError(t, err)
+					assert.NoError(t, err)
 				}))
 				defer ts.Close()
 
@@ -150,6 +153,75 @@ func TestGetQueuesDetails(t *testing.T) {
 				clusters, err := tc.GetQueues(context.Background())
 				require.NoError(t, err)
 				require.Equal(t, expected, clusters)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, tc.testFunc)
+	}
+}
+
+func TestGetNodesDetails(t *testing.T) {
+	testCases := []struct {
+		desc     string
+		testFunc func(*testing.T)
+	}{
+		{
+			desc: "Non-200 Response for GetNodes",
+			testFunc: func(t *testing.T) {
+				// Setup test server
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusForbidden)
+				}))
+				defer ts.Close()
+
+				tc := createTestClient(t, ts.URL)
+
+				nodes, err := tc.GetNodes(context.Background())
+				require.Nil(t, nodes)
+				require.EqualError(t, err, "non 200 code returned 403")
+			},
+		},
+		{
+			desc: "Bad payload returned for GetNodes",
+			testFunc: func(t *testing.T) {
+				// Setup test server
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, err := w.Write([]byte("{invalid-json}"))
+					assert.NoError(t, err)
+				}))
+				defer ts.Close()
+
+				tc := createTestClient(t, ts.URL)
+
+				nodes, err := tc.GetNodes(context.Background())
+				require.Nil(t, nodes)
+				require.ErrorContains(t, err, "failed to decode response payload")
+			},
+		},
+		{
+			desc: "Successful GetNodes call",
+			testFunc: func(t *testing.T) {
+				data := loadAPIResponseData(t, nodesAPIResponseFile)
+
+				// Setup test server
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, err := w.Write(data)
+					assert.NoError(t, err)
+				}))
+				defer ts.Close()
+
+				tc := createTestClient(t, ts.URL)
+
+				// Load the valid data into a struct to compare
+				var expected []*models.Node
+				err := json.Unmarshal(data, &expected)
+				require.NoError(t, err)
+
+				nodes, err := tc.GetNodes(context.Background())
+				require.NoError(t, err)
+				require.Equal(t, expected, nodes)
 			},
 		},
 	}

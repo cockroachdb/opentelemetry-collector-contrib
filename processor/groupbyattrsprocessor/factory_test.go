@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/processor/processortest"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbyattrsprocessor/internal/metadata"
 )
 
 func TestDefaultConfiguration(t *testing.T) {
@@ -23,32 +25,32 @@ func TestCreateTestProcessor(t *testing.T) {
 		GroupByKeys: []string{"foo"},
 	}
 
-	tp, err := createTracesProcessor(context.Background(), processortest.NewNopSettings(), cfg, consumertest.NewNop())
+	tp, err := createTracesProcessor(context.Background(), processortest.NewNopSettings(metadata.Type), cfg, consumertest.NewNop())
 	assert.NoError(t, err)
 	assert.NotNil(t, tp)
-	assert.Equal(t, true, tp.Capabilities().MutatesData)
+	assert.True(t, tp.Capabilities().MutatesData)
 
-	lp, err := createLogsProcessor(context.Background(), processortest.NewNopSettings(), cfg, consumertest.NewNop())
+	lp, err := createLogsProcessor(context.Background(), processortest.NewNopSettings(metadata.Type), cfg, consumertest.NewNop())
 	assert.NoError(t, err)
 	assert.NotNil(t, lp)
-	assert.Equal(t, true, lp.Capabilities().MutatesData)
+	assert.True(t, lp.Capabilities().MutatesData)
 
-	mp, err := createMetricsProcessor(context.Background(), processortest.NewNopSettings(), cfg, consumertest.NewNop())
+	mp, err := createMetricsProcessor(context.Background(), processortest.NewNopSettings(metadata.Type), cfg, consumertest.NewNop())
 	assert.NoError(t, err)
 	assert.NotNil(t, mp)
-	assert.Equal(t, true, mp.Capabilities().MutatesData)
+	assert.True(t, mp.Capabilities().MutatesData)
 }
 
 func TestNoKeys(t *testing.T) {
 	// This is allowed since can be used for compacting data
-	gap, err := createGroupByAttrsProcessor(processortest.NewNopSettings(), []string{})
+	gap, err := createGroupByAttrsProcessor(processortest.NewNopSettings(metadata.Type), []string{})
 	require.NoError(t, err)
 	assert.NotNil(t, gap)
 }
 
 func TestDuplicateKeys(t *testing.T) {
-	gbap, err := createGroupByAttrsProcessor(processortest.NewNopSettings(), []string{"foo", "foo", ""})
+	gbap, err := createGroupByAttrsProcessor(processortest.NewNopSettings(metadata.Type), []string{"foo", "foo", ""})
 	require.NoError(t, err)
 	assert.NotNil(t, gbap)
-	assert.EqualValues(t, []string{"foo"}, gbap.groupByKeys)
+	assert.Equal(t, []string{"foo"}, gbap.groupByKeys)
 }

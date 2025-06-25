@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
+	"go.opentelemetry.io/collector/confmap/xconfmap"
 	"go.opentelemetry.io/collector/otelcol/otelcoltest"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/geoipprocessor/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/geoipprocessor/internal/provider"
@@ -35,14 +37,44 @@ func TestLoadConfig(t *testing.T) {
 		{
 			id: component.NewIDWithName(metadata.Type, "maxmind"),
 			expected: &Config{
+				Context: resource,
 				Providers: map[string]provider.Config{
 					"maxmind": &maxmind.Config{DatabasePath: "/tmp/db"},
 				},
+				Attributes: defaultAttributes,
+			},
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "maxmind_record_context"),
+			expected: &Config{
+				Context: record,
+				Providers: map[string]provider.Config{
+					"maxmind": &maxmind.Config{DatabasePath: "/tmp/db"},
+				},
+				Attributes: defaultAttributes,
 			},
 		},
 		{
 			id:                    component.NewIDWithName(metadata.Type, "invalid_providers_config"),
 			unmarshalErrorMessage: "unexpected sub-config value kind for key:providers value:this should be a map kind:string",
+		},
+		{
+			id:                    component.NewIDWithName(metadata.Type, "invalid_source"),
+			unmarshalErrorMessage: "unknown context not.an.otlp.context, available values: resource, record",
+		},
+		{
+			id:                   component.NewIDWithName(metadata.Type, "invalid_source_attributes"),
+			validateErrorMessage: "the attributes array must not be empty",
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "custom_source_attributes"),
+			expected: &Config{
+				Context: resource,
+				Providers: map[string]provider.Config{
+					"maxmind": &maxmind.Config{DatabasePath: "/tmp/db"},
+				},
+				Attributes: []attribute.Key{"client.address", "source.address", "custom.address"},
+			},
 		},
 	}
 
@@ -58,17 +90,17 @@ func TestLoadConfig(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.unmarshalErrorMessage != "" {
-				assert.EqualError(t, sub.Unmarshal(cfg), tt.unmarshalErrorMessage)
+				assert.ErrorContains(t, sub.Unmarshal(cfg), tt.unmarshalErrorMessage)
 				return
 			}
 			require.NoError(t, sub.Unmarshal(cfg))
 
 			if tt.validateErrorMessage != "" {
-				assert.EqualError(t, component.ValidateConfig(cfg), tt.validateErrorMessage)
+				assert.EqualError(t, xconfmap.Validate(cfg), tt.validateErrorMessage)
 				return
 			}
 
-			assert.NoError(t, component.ValidateConfig(cfg))
+			assert.NoError(t, xconfmap.Validate(cfg))
 			assert.Equal(t, tt.expected, cfg)
 		})
 	}
@@ -82,7 +114,7 @@ func TestLoadConfig_InvalidProviderKey(t *testing.T) {
 	factories.Processors[metadata.Type] = factory
 	_, err = otelcoltest.LoadConfigAndValidate(filepath.Join("testdata", "config-invalidProviderKey.yaml"), factories)
 
-	require.Contains(t, err.Error(), "error reading configuration for \"geoip\": invalid provider key: invalidProviderKey")
+	require.ErrorContains(t, err, "error reading configuration for \"geoip\": invalid provider key: invalidProviderKey")
 }
 
 func TestLoadConfig_ValidProviderKey(t *testing.T) {
@@ -138,5 +170,5 @@ func TestLoadConfig_ProviderValidateError(t *testing.T) {
 	factories.Processors[metadata.Type] = factory
 	_, err = otelcoltest.LoadConfigAndValidate(filepath.Join("testdata", "config-mockProvider.yaml"), factories)
 
-	require.Contains(t, err.Error(), "error validating provider mock")
+	require.ErrorContains(t, err, "error validating provider mock")
 }

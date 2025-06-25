@@ -18,6 +18,7 @@ import (
 	"github.com/rs/cors"
 	"github.com/soheilhy/cmux"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
@@ -145,20 +146,20 @@ func (ocr *ocReceiver) Start(ctx context.Context, host component.Host) error {
 		defer ocr.stopWG.Done()
 		startWG.Done()
 		// Check for cmux.ErrServerClosed, because during the shutdown this is not properly close before closing the cmux,
-		if err := ocr.serverGRPC.Serve(grpcL); !errors.Is(err, grpc.ErrServerStopped) && !errors.Is(err, cmux.ErrServerClosed) && err != nil {
-			ocr.settings.TelemetrySettings.ReportStatus(component.NewFatalErrorEvent(err))
+		if err := ocr.serverGRPC.Serve(grpcL); err != nil && !errors.Is(err, grpc.ErrServerStopped) && !errors.Is(err, cmux.ErrServerClosed) {
+			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 		}
 	}()
 	go func() {
 		startWG.Done()
-		if err := ocr.serverHTTP.Serve(httpL); !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, cmux.ErrServerClosed) && err != nil {
-			ocr.settings.TelemetrySettings.ReportStatus(component.NewFatalErrorEvent(err))
+		if err := ocr.serverHTTP.Serve(httpL); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, cmux.ErrServerClosed) {
+			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 		}
 	}()
 	go func() {
 		startWG.Done()
-		if err := ocr.multiplexer.Serve(); !errors.Is(err, cmux.ErrServerClosed) && !errors.Is(err, cmux.ErrListenerClosed) && err != nil {
-			ocr.settings.TelemetrySettings.ReportStatus(component.NewFatalErrorEvent(err))
+		if err := ocr.multiplexer.Serve(); err != nil && !errors.Is(err, net.ErrClosed) {
+			componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 		}
 	}()
 
@@ -188,7 +189,6 @@ func (ocr *ocReceiver) Start(ctx context.Context, host component.Host) error {
 
 // Shutdown is a method to turn off receiving.
 func (ocr *ocReceiver) Shutdown(context.Context) error {
-
 	if ocr.cancel != nil {
 		ocr.cancel()
 	}

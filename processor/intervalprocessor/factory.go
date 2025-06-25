@@ -5,7 +5,7 @@ package intervalprocessor // import "github.com/open-telemetry/opentelemetry-col
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -26,13 +26,17 @@ func NewFactory() processor.Factory {
 func createDefaultConfig() component.Config {
 	return &Config{
 		Interval: 60 * time.Second,
+		PassThrough: PassThrough{
+			Gauge:   false,
+			Summary: false,
+		},
 	}
 }
 
 func createMetricsProcessor(_ context.Context, set processor.Settings, cfg component.Config, nextConsumer consumer.Metrics) (processor.Metrics, error) {
 	processorConfig, ok := cfg.(*Config)
 	if !ok {
-		return nil, fmt.Errorf("configuration parsing error")
+		return nil, errors.New("configuration parsing error")
 	}
 
 	return newProcessor(processorConfig, set.Logger, nextConsumer), nil

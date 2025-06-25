@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
+	"go.opentelemetry.io/collector/confmap/xconfmap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sapmreceiver/internal/metadata"
 )
 
@@ -45,23 +45,12 @@ func TestLoadConfig(t *testing.T) {
 			expected: &Config{
 				ServerConfig: confighttp.ServerConfig{
 					Endpoint: "localhost:7276",
-					TLSSetting: &configtls.ServerConfig{
+					TLS: &configtls.ServerConfig{
 						Config: configtls.Config{
 							CertFile: "/test.crt",
 							KeyFile:  "/test.key",
 						},
 					},
-				},
-			},
-		},
-		{
-			id: component.NewIDWithName(metadata.Type, "passthrough"),
-			expected: &Config{
-				ServerConfig: confighttp.ServerConfig{
-					Endpoint: "localhost:7276",
-				},
-				AccessTokenPassthroughConfig: splunk.AccessTokenPassthroughConfig{
-					AccessTokenPassthrough: true,
 				},
 			},
 		},
@@ -76,7 +65,7 @@ func TestLoadConfig(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, sub.Unmarshal(cfg))
 
-			assert.NoError(t, component.ValidateConfig(cfg))
+			assert.NoError(t, xconfmap.Validate(cfg))
 			assert.Equal(t, tt.expected, cfg)
 		})
 	}

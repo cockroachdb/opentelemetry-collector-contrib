@@ -15,7 +15,6 @@ import (
 )
 
 func Test_extractGrokPatterns_patterns(t *testing.T) {
-
 	tests := []struct {
 		name              string
 		targetString      string
@@ -123,12 +122,11 @@ func Test_extractGrokPatterns_patterns(t *testing.T) {
 			expected := pcommon.NewMap()
 			tt.want(expected)
 
-			expected.Range(func(k string, _ pcommon.Value) bool {
+			for k := range expected.All() {
 				ev, _ := expected.Get(k)
 				av, _ := resultMap.Get(k)
 				assert.Equal(t, ev, av)
-				return true
-			})
+			}
 		})
 	}
 }

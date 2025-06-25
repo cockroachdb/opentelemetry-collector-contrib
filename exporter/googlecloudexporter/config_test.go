@@ -36,7 +36,7 @@ func TestLoadConfig(t *testing.T) {
 
 	assert.Equal(t,
 		&Config{
-			TimeoutSettings: exporterhelper.TimeoutSettings{
+			TimeoutSettings: exporterhelper.TimeoutConfig{
 				Timeout: 20 * time.Second,
 			},
 			Config: collector.Config{
@@ -64,18 +64,19 @@ func TestLoadConfig(t *testing.T) {
 					},
 				},
 			},
-			QueueSettings: exporterhelper.QueueSettings{
+			QueueSettings: exporterhelper.QueueBatchConfig{
 				Enabled:      true,
 				NumConsumers: 2,
 				QueueSize:    10,
+				Sizer:        exporterhelper.RequestSizerTypeRequests,
 			},
 		},
 		sanitize(cfg.(*Config)))
 }
 
 func sanitize(cfg *Config) *Config {
-	cfg.Config.MetricConfig.MapMonitoredResource = nil
-	cfg.Config.LogConfig.MapMonitoredResource = nil
-	cfg.Config.MetricConfig.GetMetricName = nil
+	cfg.MetricConfig.MapMonitoredResource = nil
+	cfg.LogConfig.MapMonitoredResource = nil
+	cfg.MetricConfig.GetMetricName = nil
 	return cfg
 }

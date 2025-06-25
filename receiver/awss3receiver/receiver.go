@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -33,7 +34,7 @@ type receiverProcessor interface {
 }
 
 type awss3Receiver struct {
-	s3Reader        *s3Reader
+	reader          s3Reader
 	logger          *zap.Logger
 	cancel          context.CancelFunc
 	obsrecv         *receiverhelper.ObsReport
@@ -41,13 +42,30 @@ type awss3Receiver struct {
 	telemetryType   string
 	dataProcessor   receiverProcessor
 	extensions      encodingExtensions
+	notifier        statusNotifier
 }
 
 func newAWSS3Receiver(ctx context.Context, cfg *Config, telemetryType string, settings receiver.Settings, processor receiverProcessor) (*awss3Receiver, error) {
-	reader, err := newS3Reader(ctx, cfg)
-	if err != nil {
-		return nil, err
+	notifier := newNotifier(cfg, settings.Logger)
+	var reader s3Reader
+	var err error
+
+	// Create the appropriate reader based on configuration
+	switch {
+	case cfg.StartTime != "" && cfg.EndTime != "":
+		reader, err = newS3TimeBasedReader(ctx, notifier, settings.Logger, cfg)
+		if err != nil {
+			return nil, err
+		}
+	case cfg.SQS != nil:
+		reader, err = newS3SQSReader(ctx, settings.Logger, cfg)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("invalid configuration: either time-based (StartTime/EndTime) or SQS-based configuration must be provided")
 	}
+
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             settings.ID,
 		Transport:              "s3",
@@ -58,32 +76,43 @@ func newAWSS3Receiver(ctx context.Context, cfg *Config, telemetryType string, se
 	}
 
 	return &awss3Receiver{
-		s3Reader:        reader,
+		reader:          reader,
 		telemetryType:   telemetryType,
 		logger:          settings.Logger,
 		cancel:          nil,
 		obsrecv:         obsrecv,
 		dataProcessor:   processor,
 		encodingsConfig: cfg.Encodings,
+		notifier:        notifier,
 	}, nil
 }
 
-func (r *awss3Receiver) Start(_ context.Context, host component.Host) error {
+func (r *awss3Receiver) Start(ctx context.Context, host component.Host) error {
 	var err error
+	if r.notifier != nil {
+		if err = r.notifier.Start(ctx, host); err != nil {
+			return err
+		}
+	}
 	r.extensions, err = newEncodingExtensions(r.encodingsConfig, host)
 	if err != nil {
 		return err
 	}
 
-	var ctx context.Context
-	ctx, r.cancel = context.WithCancel(context.Background())
+	var cancelCtx context.Context
+	cancelCtx, r.cancel = context.WithCancel(context.Background())
 	go func() {
-		_ = r.s3Reader.readAll(ctx, r.telemetryType, r.receiveBytes)
+		_ = r.reader.readAll(cancelCtx, r.telemetryType, r.receiveBytes)
 	}()
 	return nil
 }
 
-func (r *awss3Receiver) Shutdown(_ context.Context) error {
+func (r *awss3Receiver) Shutdown(ctx context.Context) error {
+	if r.notifier != nil {
+		if err := r.notifier.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -139,6 +168,7 @@ func (r *traceReceiver) processReceivedData(ctx context.Context, rcvr *awss3Rece
 		rcvr.logger.Warn("Unsupported file format", zap.String("key", key))
 		return nil
 	}
+	rcvr.logger.Debug("Processing trace file", zap.String("key", key), zap.String("format", format))
 	traces, err := unmarshaler.UnmarshalTraces(data)
 	if err != nil {
 		return err
@@ -180,6 +210,7 @@ func (r *metricsReceiver) processReceivedData(ctx context.Context, rcvr *awss3Re
 		rcvr.logger.Warn("Unsupported file format", zap.String("key", key))
 		return nil
 	}
+	rcvr.logger.Debug("Processing metric file", zap.String("key", key), zap.String("format", format))
 	metrics, err := unmarshaler.UnmarshalMetrics(data)
 	if err != nil {
 		return err
@@ -221,6 +252,7 @@ func (r *logsReceiver) processReceivedData(ctx context.Context, rcvr *awss3Recei
 		rcvr.logger.Warn("Unsupported file format", zap.String("key", key))
 		return nil
 	}
+	rcvr.logger.Debug("Processing log file", zap.String("key", key), zap.String("format", format))
 	logs, err := unmarshaler.UnmarshalLogs(data)
 	if err != nil {
 		return err
@@ -235,11 +267,11 @@ func newEncodingExtensions(encodingsConfig []Encoding, host component.Host) (enc
 	encodings := make(encodingExtensions, 0)
 	extensions := host.GetExtensions()
 	for _, configItem := range encodingsConfig {
-		if e, ok := extensions[configItem.Extension]; ok {
-			encodings = append(encodings, encodingExtension{extension: e, suffix: configItem.Suffix})
-		} else {
+		e, ok := extensions[configItem.Extension]
+		if !ok {
 			return nil, fmt.Errorf("extension %q not found", configItem.Extension)
 		}
+		encodings = append(encodings, encodingExtension{extension: e, suffix: configItem.Suffix})
 	}
 	return encodings, nil
 }

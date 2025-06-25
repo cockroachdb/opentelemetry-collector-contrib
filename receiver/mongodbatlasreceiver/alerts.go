@@ -22,10 +22,11 @@ import (
 
 	"go.mongodb.org/atlas/mongodbatlas"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componentstatus"
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/extension/experimental/storage"
+	"go.opentelemetry.io/collector/extension/xextension/storage"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	rcvr "go.opentelemetry.io/collector/receiver"
@@ -70,6 +71,7 @@ type alertsReceiver struct {
 	// only relevant in `poll` mode
 	projects          []*ProjectConfig
 	client            alertsClient
+	baseURL           string
 	privateKey        string
 	publicKey         string
 	backoffConfig     configretry.BackOffConfig
@@ -107,6 +109,7 @@ func newAlertsReceiver(params rcvr.Settings, baseConfig *Config, consumer consum
 		mode:              cfg.Mode,
 		projects:          cfg.Projects,
 		backoffConfig:     baseConfig.BackOffConfig,
+		baseURL:           baseConfig.BaseURL,
 		publicKey:         baseConfig.PublicKey,
 		privateKey:        string(baseConfig.PrivateKey),
 		wg:                &sync.WaitGroup{},
@@ -118,7 +121,12 @@ func newAlertsReceiver(params rcvr.Settings, baseConfig *Config, consumer consum
 	}
 
 	if recv.mode == alertModePoll {
-		recv.client = internal.NewMongoDBAtlasClient(recv.publicKey, recv.privateKey, recv.backoffConfig, recv.telemetrySettings.Logger)
+		client, err := internal.NewMongoDBAtlasClient(recv.baseURL, recv.publicKey, recv.privateKey, recv.backoffConfig, recv.telemetrySettings.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create MongoDB Atlas client for alerts receiver: %w", err)
+		}
+
+		recv.client = client
 		return recv, nil
 	}
 	s := &http.Server{
@@ -130,11 +138,11 @@ func newAlertsReceiver(params rcvr.Settings, baseConfig *Config, consumer consum
 	return recv, nil
 }
 
-func (a *alertsReceiver) Start(ctx context.Context, _ component.Host, storageClient storage.Client) error {
+func (a *alertsReceiver) Start(ctx context.Context, host component.Host, storageClient storage.Client) error {
 	if a.mode == alertModePoll {
 		return a.startPolling(ctx, storageClient)
 	}
-	return a.startListening(ctx)
+	return a.startListening(ctx, host)
 }
 
 func (a *alertsReceiver) startPolling(ctx context.Context, storageClient storage.Client) error {
@@ -209,7 +217,7 @@ func (a *alertsReceiver) pollAndProcess(ctx context.Context, pc *ProjectConfig, 
 	}
 }
 
-func (a *alertsReceiver) startListening(ctx context.Context) error {
+func (a *alertsReceiver) startListening(ctx context.Context, host component.Host) error {
 	a.telemetrySettings.Logger.Debug("starting alerts receiver in listening mode")
 	// We use a.server.Serve* over a.server.ListenAndServe*
 	// So that we can catch and return errors relating to binding to network interface on start.
@@ -236,7 +244,7 @@ func (a *alertsReceiver) startListening(ctx context.Context) error {
 
 			if err != http.ErrServerClosed {
 				a.telemetrySettings.Logger.Error("ServeTLS failed", zap.Error(err))
-				a.telemetrySettings.ReportStatus(component.NewFatalErrorEvent(err))
+				componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 			}
 		}()
 	} else {
@@ -250,7 +258,7 @@ func (a *alertsReceiver) startListening(ctx context.Context) error {
 			a.telemetrySettings.Logger.Debug("Serve done")
 
 			if err != http.ErrServerClosed {
-				a.telemetrySettings.ReportStatus(component.NewFatalErrorEvent(err))
+				componentstatus.ReportStatus(host, componentstatus.NewFatalErrorEvent(err))
 			}
 		}()
 	}
@@ -497,7 +505,6 @@ func payloadToLogs(now time.Time, payload []byte) (plog.Logs, error) {
 
 		attrs.PutStr("net.peer.name", host)
 		attrs.PutInt("net.peer.port", port)
-
 	}
 
 	return logs, nil
@@ -549,12 +556,12 @@ func (a *alertsReceiver) writeCheckpoint(ctx context.Context) error {
 func (a *alertsReceiver) applyFilters(pConf *ProjectConfig, alerts []mongodbatlas.Alert) []mongodbatlas.Alert {
 	filtered := []mongodbatlas.Alert{}
 
-	var lastRecordedTime = pcommon.Timestamp(0).AsTime()
+	lastRecordedTime := pcommon.Timestamp(0).AsTime()
 	if a.record.LastRecordedTime != nil {
 		lastRecordedTime = *a.record.LastRecordedTime
 	}
 	// we need to maintain two timestamps in order to not conflict while iterating
-	var latestInPayload = pcommon.Timestamp(0).AsTime()
+	latestInPayload := pcommon.Timestamp(0).AsTime()
 
 	for _, alert := range alerts {
 		updatedTime, err := time.Parse(time.RFC3339, alert.Updated)

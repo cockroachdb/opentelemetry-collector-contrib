@@ -633,7 +633,7 @@ func attributeValueToKineticaFieldValue(value pcommon.Value) (ValueTypePair, err
 //	@return map
 func otlpKeyValueListToMap(kvList pcommon.Map) map[string]any {
 	m := make(map[string]any, kvList.Len())
-	kvList.Range(func(k string, v pcommon.Value) bool {
+	for k, v := range kvList.All() {
 		switch v.Type() {
 		case pcommon.ValueTypeStr:
 			m[k] = v.Str()
@@ -652,8 +652,7 @@ func otlpKeyValueListToMap(kvList pcommon.Map) map[string]any {
 		default:
 			m[k] = fmt.Sprintf("<invalid map value> %v", v)
 		}
-		return true
-	})
+	}
 	return m
 }
 
@@ -733,7 +732,6 @@ func getAttributeValue(vtPair ValueTypePair) (*AttributeValue, error) {
 	}
 
 	return av, nil
-
 }
 
 // chunkBySize - Splits a slice into multiple slices of the given size
@@ -742,7 +740,7 @@ func getAttributeValue(vtPair ValueTypePair) (*AttributeValue, error) {
 //	@param chunkSize
 //	@return [][]T
 func chunkBySize[T any](items []T, chunkSize int) [][]T {
-	var _chunks = make([][]T, 0, (len(items)/chunkSize)+1)
+	_chunks := make([][]T, 0, (len(items)/chunkSize)+1)
 	for chunkSize < len(items) {
 		items, _chunks = items[chunkSize:], append(_chunks, items[0:chunkSize:chunkSize])
 	}

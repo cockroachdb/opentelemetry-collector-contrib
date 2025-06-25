@@ -5,6 +5,7 @@ package testbed // import "github.com/open-telemetry/opentelemetry-collector-con
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -46,6 +47,9 @@ type LoadOptions struct {
 
 	// Parallel specifies how many goroutines to send from.
 	Parallel int
+
+	// MaxDelay defines the longest amount of time we can continue retrying for non-permanent errors.
+	MaxDelay time.Duration
 }
 
 var _ LoadGenerator = (*ProviderSender)(nil)
@@ -77,7 +81,7 @@ type ProviderSender struct {
 // NewLoadGenerator creates a ProviderSender to send DataProvider-generated telemetry via a DataSender.
 func NewLoadGenerator(dataProvider DataProvider, sender DataSender) (LoadGenerator, error) {
 	if sender == nil {
-		return nil, fmt.Errorf("cannot create load generator without DataSender")
+		return nil, errors.New("cannot create load generator without DataSender")
 	}
 
 	ps := &ProviderSender{
@@ -110,6 +114,11 @@ func (ps *ProviderSender) Start(options LoadOptions) {
 	if ps.options.ItemsPerBatch == 0 {
 		// 10 items per batch by default.
 		ps.options.ItemsPerBatch = 10
+	}
+
+	if ps.options.MaxDelay == 0 {
+		// retry for an additional 10 seconds by default
+		ps.options.MaxDelay = time.Second * 10
 	}
 
 	log.Printf("Starting load generator at %d items/sec.", ps.options.DataItemsPerSecond)
@@ -205,12 +214,14 @@ func (ps *ProviderSender) generate() {
 
 	var workers sync.WaitGroup
 
+	tickDuration := ps.perWorkerTickDuration(numWorkers)
+
 	for i := 0; i < numWorkers; i++ {
 		workers.Add(1)
 
 		go func() {
 			defer workers.Done()
-			t := time.NewTicker(time.Second / time.Duration(ps.options.DataItemsPerSecond/ps.options.ItemsPerBatch/numWorkers))
+			t := time.NewTicker(tickDuration)
 			defer t.Stop()
 
 			var prevErr error
@@ -240,6 +251,7 @@ func (ps *ProviderSender) generateTrace() error {
 	traceSender := ps.Sender.(TraceDataSender)
 
 	traceData, done := ps.Provider.GenerateTraces()
+	timer := time.NewTimer(ps.options.MaxDelay)
 	if done {
 		return nil
 	}
@@ -258,9 +270,8 @@ func (ps *ProviderSender) generateTrace() error {
 			return fmt.Errorf("cannot send traces: %w", err)
 		}
 		ps.nonPermanentErrors.Add(uint64(traceData.SpanCount()))
-
 		select {
-		case <-ps.stopSignal:
+		case <-timer.C:
 			return nil
 		default:
 		}
@@ -271,6 +282,7 @@ func (ps *ProviderSender) generateMetrics() error {
 	metricSender := ps.Sender.(MetricDataSender)
 
 	metricData, done := ps.Provider.GenerateMetrics()
+	timer := time.NewTimer(ps.options.MaxDelay)
 	if done {
 		return nil
 	}
@@ -291,7 +303,7 @@ func (ps *ProviderSender) generateMetrics() error {
 		ps.nonPermanentErrors.Add(uint64(metricData.DataPointCount()))
 
 		select {
-		case <-ps.stopSignal:
+		case <-timer.C:
 			return nil
 		default:
 		}
@@ -302,6 +314,7 @@ func (ps *ProviderSender) generateLog() error {
 	logSender := ps.Sender.(LogDataSender)
 
 	logData, done := ps.Provider.GenerateLogs()
+	timer := time.NewTimer(ps.options.MaxDelay)
 	if done {
 		return nil
 	}
@@ -322,9 +335,21 @@ func (ps *ProviderSender) generateLog() error {
 		ps.nonPermanentErrors.Add(uint64(logData.LogRecordCount()))
 
 		select {
-		case <-ps.stopSignal:
+		case <-timer.C:
 			return nil
 		default:
 		}
 	}
+}
+
+// perWorkerTickDuration calculates the tick interval each worker must observe in order to
+// produce the desired average DataItemsPerSecond given the constraints of ItemsPerBatch and numWorkers.
+//
+// Of particular note are cases when the batchesPerSecond required of each worker is less than one due to a high
+// number of workers relative to the desired DataItemsPerSecond. If the total batchesPerSecond is less than the
+// number of workers then we are dealing with fractional batches per second per worker, so we need float arithmetic.
+func (ps *ProviderSender) perWorkerTickDuration(numWorkers int) time.Duration {
+	batchesPerSecond := float64(ps.options.DataItemsPerSecond) / float64(ps.options.ItemsPerBatch)
+	batchesPerSecondPerWorker := batchesPerSecond / float64(numWorkers)
+	return time.Duration(float64(time.Second) / batchesPerSecondPerWorker)
 }

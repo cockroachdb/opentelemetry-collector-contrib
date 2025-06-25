@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/pipeline"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/datareceivers"
@@ -73,6 +73,15 @@ func TestMetric10kDPS(t *testing.T) {
 				ExpectedMaxRAM: 98,
 			},
 		},
+		{
+			name:     "STEF",
+			sender:   datasenders.NewStefDataSender(testbed.DefaultHost, testutil.GetAvailablePort(t)),
+			receiver: datareceivers.NewStefDataReceiver(testutil.GetAvailablePort(t)),
+			resourceSpec: testbed.ResourceSpec{
+				ExpectedMaxCPU: 60,
+				ExpectedMaxRAM: 150,
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -88,10 +97,10 @@ func TestMetric10kDPS(t *testing.T) {
 				performanceResultsSummary,
 				nil,
 				nil,
+				nil,
 			)
 		})
 	}
-
 }
 
 func TestMetricsFromFile(t *testing.T) {
@@ -101,7 +110,7 @@ func TestMetricsFromFile(t *testing.T) {
 	resultDir, err := filepath.Abs(filepath.Join("results", t.Name()))
 	require.NoError(t, err)
 
-	dataProvider, err := testbed.NewFileDataProvider("testdata/k8s-metrics.yaml", component.DataTypeMetrics)
+	dataProvider, err := testbed.NewFileDataProvider("testdata/k8s-metrics.yaml", pipeline.SignalMetrics)
 	assert.NoError(t, err)
 
 	options := testbed.LoadOptions{
@@ -116,7 +125,7 @@ func TestMetricsFromFile(t *testing.T) {
 	receiver := testbed.NewOTLPDataReceiver(testutil.GetAvailablePort(t))
 
 	configStr := createConfigYaml(t, sender, receiver, resultDir, nil, nil)
-	configCleanup, err := agentProc.PrepareConfig(configStr)
+	configCleanup, err := agentProc.PrepareConfig(t, configStr)
 	require.NoError(t, err)
 	defer configCleanup()
 

@@ -90,17 +90,16 @@ func createExporter(ctx context.Context, c component.Config, log *zap.Logger, op
 	}
 
 	encoder, err := batch.NewEncoder(
-		conf.Encoding.Name,
+		conf.Name,
 		batch.WithMaxRecordSize(conf.MaxRecordSize),
 		batch.WithMaxRecordsPerBatch(conf.MaxRecordsPerBatch),
 		batch.WithCompressionType(conf.Compression),
 	)
-
 	if err != nil {
 		return nil, err
 	}
 
-	if conf.Encoding.Name == "otlp_json" {
+	if conf.Name == "otlp_json" {
 		log.Info("otlp_json is considered experimental and should not be used in a production environment")
 	}
 

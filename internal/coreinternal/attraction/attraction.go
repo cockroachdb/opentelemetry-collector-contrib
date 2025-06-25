@@ -34,7 +34,7 @@ type ActionKeyValue struct {
 	// The type of the value is inferred from the configuration.
 	Value any `mapstructure:"value"`
 
-	// A regex pattern  must be specified for the action EXTRACT.
+	// A regex pattern must be specified for the action EXTRACT.
 	// It uses the attribute specified by `key' to extract values from
 	// The target keys are inferred based on the names of the matcher groups
 	// provided and the names will be inferred based on the values of the
@@ -440,11 +440,10 @@ func getMatchingKeys(regexp *regexp.Regexp, attrs pcommon.Map) []string {
 		return keys
 	}
 
-	attrs.Range(func(k string, _ pcommon.Value) bool {
+	for k := range attrs.All() {
 		if regexp.MatchString(k) {
 			keys = append(keys, k)
 		}
-		return true
-	})
+	}
 	return keys
 }

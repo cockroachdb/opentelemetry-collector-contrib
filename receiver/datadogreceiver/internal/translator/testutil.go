@@ -12,10 +12,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
-const (
-	scopeName              string = "otelcol/datadogreceiver"
-	aggregationTemporality        = pmetric.AggregationTemporalityDelta
-)
+const aggregationTemporality = pmetric.AggregationTemporalityDelta
 
 func createMetricsTranslator() *MetricsTranslator {
 	mt := NewMetricsTranslator(component.BuildInfo{
@@ -27,23 +24,22 @@ func createMetricsTranslator() *MetricsTranslator {
 }
 
 func requireResourceAttributes(t *testing.T, attrs, expectedAttrs pcommon.Map) {
-	expectedAttrs.Range(func(k string, _ pcommon.Value) bool {
+	for k := range expectedAttrs.All() {
 		ev, _ := expectedAttrs.Get(k)
 		av, ok := attrs.Get(k)
 		require.True(t, ok)
 		require.Equal(t, ev, av)
-		return true
-	})
+	}
 }
 
-// nolint:unparam
+//nolint:unparam
 func requireScopeMetrics(t *testing.T, result pmetric.Metrics, expectedScopeMetricsLen, expectedMetricsLen int) {
 	require.Equal(t, expectedScopeMetricsLen, result.ResourceMetrics().At(0).ScopeMetrics().Len())
 	require.Equal(t, expectedMetricsLen, result.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().Len())
 }
 
 func requireScope(t *testing.T, result pmetric.Metrics, expectedAttrs pcommon.Map, expectedVersion string) {
-	require.Equal(t, scopeName, result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Name())
+	require.Equal(t, "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver/internal/translator", result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Name())
 	require.Equal(t, expectedVersion, result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Version())
 	require.Equal(t, expectedAttrs, result.ResourceMetrics().At(0).ScopeMetrics().At(0).Scope().Attributes())
 }
@@ -70,4 +66,17 @@ func requireDp(t *testing.T, dp pmetric.NumberDataPoint, expectedAttrs pcommon.M
 	require.Equal(t, expectedTime, dp.Timestamp().AsTime().Unix())
 	require.Equal(t, expectedValue, dp.DoubleValue())
 	require.Equal(t, expectedAttrs, dp.Attributes())
+}
+
+func totalHistBucketCounts(hist pmetric.ExponentialHistogramDataPoint) uint64 {
+	var totalCount uint64
+	for i := 0; i < hist.Negative().BucketCounts().Len(); i++ {
+		totalCount += hist.Negative().BucketCounts().At(i)
+	}
+
+	totalCount += hist.ZeroCount()
+	for i := 0; i < hist.Positive().BucketCounts().Len(); i++ {
+		totalCount += hist.Positive().BucketCounts().At(i)
+	}
+	return totalCount
 }

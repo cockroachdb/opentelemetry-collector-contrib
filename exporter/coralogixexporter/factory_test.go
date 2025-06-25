@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/coralogixexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 )
 
@@ -30,56 +31,56 @@ func TestCreateDefaultConfig(t *testing.T) {
 	ocfg, ok := factory.CreateDefaultConfig().(*Config)
 	assert.True(t, ok)
 	assert.Equal(t, ocfg.BackOffConfig, configretry.NewDefaultBackOffConfig())
-	assert.Equal(t, ocfg.QueueSettings, exporterhelper.NewDefaultQueueSettings())
-	assert.Equal(t, ocfg.TimeoutSettings, exporterhelper.NewDefaultTimeoutSettings())
+	assert.Equal(t, ocfg.QueueSettings, exporterhelper.NewDefaultQueueConfig())
+	assert.Equal(t, ocfg.TimeoutSettings, exporterhelper.NewDefaultTimeoutConfig())
 }
 
-func TestCreateMetricsExporter(t *testing.T) {
+func TestCreateMetrics(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.Metrics.Endpoint = testutil.GetAvailableLocalAddress(t)
 
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateMetricsExporter(context.Background(), set, cfg)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateMetrics(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, oexp)
 	require.NoError(t, oexp.Shutdown(context.Background()))
 }
 
-func TestCreateMetricsExporterWithDomain(t *testing.T) {
+func TestCreateMetricsWithDomain(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.Domain = "localhost"
 
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateMetricsExporter(context.Background(), set, cfg)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateMetrics(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, oexp)
 }
 
-func TestCreateLogsExporter(t *testing.T) {
+func TestCreateLogs(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.Logs.Endpoint = testutil.GetAvailableLocalAddress(t)
 
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateLogsExporter(context.Background(), set, cfg)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateLogs(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, oexp)
 	require.NoError(t, oexp.Shutdown(context.Background()))
 }
 
-func TestCreateLogsExporterWithDomain(t *testing.T) {
+func TestCreateLogsWithDomain(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.Domain = "localhost"
-	set := exportertest.NewNopSettings()
-	oexp, err := factory.CreateLogsExporter(context.Background(), set, cfg)
+	set := exportertest.NewNopSettings(metadata.Type)
+	oexp, err := factory.CreateLogs(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, oexp)
 }
 
-func TestCreateTracesExporter(t *testing.T) {
+func TestCreateTraces(t *testing.T) {
 	endpoint := testutil.GetAvailableLocalAddress(t)
 	tests := []struct {
 		name             string
@@ -92,7 +93,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				Traces: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Insecure: false,
 					},
 				},
@@ -172,7 +173,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				Traces: configgrpc.ClientConfig{
 					Endpoint: endpoint,
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Config: configtls.Config{
 							CAFile: "nosuchfile",
 						},
@@ -186,7 +187,7 @@ func TestCreateTracesExporter(t *testing.T) {
 			config: &Config{
 				Domain: "localhost",
 				DomainSettings: configgrpc.ClientConfig{
-					TLSSetting: configtls.ClientConfig{
+					TLS: configtls.ClientConfig{
 						Insecure: false,
 					},
 				},
@@ -197,8 +198,8 @@ func TestCreateTracesExporter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			factory := NewFactory()
-			set := exportertest.NewNopSettings()
-			consumer, err := factory.CreateTracesExporter(context.Background(), set, tt.config)
+			set := exportertest.NewNopSettings(metadata.Type)
+			consumer, err := factory.CreateTraces(context.Background(), set, tt.config)
 			if tt.mustFailOnCreate {
 				assert.Error(t, err)
 				return
@@ -215,21 +216,21 @@ func TestCreateTracesExporter(t *testing.T) {
 			if err != nil {
 				// Since the endpoint of OTLP exporter doesn't actually exist,
 				// exporter may already stop because it cannot connect.
-				assert.Equal(t, err.Error(), "rpc error: code = Canceled desc = grpc: the client connection is closing")
+				assert.Equal(t, "rpc error: code = Canceled desc = grpc: the client connection is closing", err.Error())
 			}
 		})
 	}
 }
 
-func TestCreateLogsExporterWithDomainAndEndpoint(t *testing.T) {
+func TestCreateLogsWithDomainAndEndpoint(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.Domain = "	bad domain"
 
 	cfg.Logs.Endpoint = testutil.GetAvailableLocalAddress(t)
 
-	set := exportertest.NewNopSettings()
-	consumer, err := factory.CreateLogsExporter(context.Background(), set, cfg)
+	set := exportertest.NewNopSettings(metadata.Type)
+	consumer, err := factory.CreateLogs(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, consumer)
 
@@ -240,7 +241,6 @@ func TestCreateLogsExporterWithDomainAndEndpoint(t *testing.T) {
 	if err != nil {
 		// Since the endpoint of OTLP exporter doesn't actually exist,
 		// exporter may already stop because it cannot connect.
-		assert.Equal(t, err.Error(), "rpc error: code = Canceled desc = grpc: the client connection is closing")
+		assert.Equal(t, "rpc error: code = Canceled desc = grpc: the client connection is closing", err.Error())
 	}
-
 }

@@ -23,7 +23,6 @@ func NewFactory() receiver.Factory {
 		createDefaultConfig,
 		receiver.WithMetrics(createMetricsReceiver, metadata.MetricsStability),
 		receiver.WithTraces(createTracesReceiver, metadata.TracesStability))
-
 }
 
 func createDefaultConfig() component.Config {
@@ -31,7 +30,8 @@ func createDefaultConfig() component.Config {
 		ServerConfig: confighttp.ServerConfig{
 			Endpoint: "localhost:8126",
 		},
-		ReadTimeout: 60 * time.Second,
+		ReadTimeout:      60 * time.Second,
+		TraceIDCacheSize: 100,
 	}
 }
 

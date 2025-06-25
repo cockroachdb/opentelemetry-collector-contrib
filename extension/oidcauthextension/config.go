@@ -5,7 +5,6 @@ package oidcauthextension // import "github.com/open-telemetry/opentelemetry-col
 
 // Config has the configuration for the OIDC Authenticator extension.
 type Config struct {
-
 	// The attribute (header name) to look for auth data. Optional, default value: "authorization".
 	Attribute string `mapstructure:"attribute"`
 
@@ -15,8 +14,12 @@ type Config struct {
 
 	// Audience of the token, used during the verification.
 	// For example: "https://accounts.google.com" or "https://login.salesforce.com".
-	// Required.
+	// Required unless IgnoreAudience is true.
 	Audience string `mapstructure:"audience"`
+
+	// When true, this skips validating the audience field.
+	// Optional.
+	IgnoreAudience bool `mapstructure:"ignore_audience"`
 
 	// The local path for the issuer CA's TLS server cert.
 	// Optional.
@@ -32,7 +35,7 @@ type Config struct {
 }
 
 func (c *Config) Validate() error {
-	if c.Audience == "" {
+	if c.Audience == "" && !c.IgnoreAudience {
 		return errNoAudienceProvided
 	}
 	if c.IssuerURL == "" {

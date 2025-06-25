@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/processor"
-	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
+	conventions "go.opentelemetry.io/otel/semconv/v1.6.1"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/metadataproviders/system"
@@ -22,23 +22,13 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor/internal/system/internal/metadata"
 )
 
-var (
-	_ = featuregate.GlobalRegistry().MustRegister(
-		"processor.resourcedetection.hostCPUModelAndFamilyAsString",
-		featuregate.StageStable,
-		featuregate.WithRegisterDescription("Change type of host.cpu.model.id and host.cpu.model.family to string."),
-		featuregate.WithRegisterFromVersion("v0.89.0"),
-		featuregate.WithRegisterToVersion("v0.101.0"),
-		featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/semantic-conventions/issues/495"),
-	)
-	hostCPUSteppingAsStringID          = "processor.resourcedetection.hostCPUSteppingAsString"
-	hostCPUSteppingAsStringFeatureGate = featuregate.GlobalRegistry().MustRegister(
-		hostCPUSteppingAsStringID,
-		featuregate.StageBeta,
-		featuregate.WithRegisterDescription("Change type of host.cpu.stepping to string."),
-		featuregate.WithRegisterFromVersion("v0.95.0"),
-		featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/semantic-conventions/issues/664"),
-	)
+var _ = featuregate.GlobalRegistry().MustRegister(
+	"processor.resourcedetection.hostCPUSteppingAsString",
+	featuregate.StageStable,
+	featuregate.WithRegisterDescription("Change type of host.cpu.stepping to string."),
+	featuregate.WithRegisterFromVersion("v0.95.0"),
+	featuregate.WithRegisterToVersion("v0.110.0"),
+	featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/semantic-conventions/issues/664"),
 )
 
 const (
@@ -98,6 +88,11 @@ func (d *Detector) Detect(ctx context.Context) (resource pcommon.Resource, schem
 		return pcommon.NewResource(), "", fmt.Errorf("failed getting OS type: %w", err)
 	}
 
+	osVersion, err := d.provider.OSVersion()
+	if err != nil {
+		return pcommon.NewResource(), "", fmt.Errorf("failed getting OS version: %w", err)
+	}
+
 	hostArch, err := d.provider.HostArch()
 	if err != nil {
 		return pcommon.NewResource(), "", fmt.Errorf("failed getting host architecture: %w", err)
@@ -125,6 +120,17 @@ func (d *Detector) Detect(ctx context.Context) (resource pcommon.Resource, schem
 		}
 	}
 
+	var hostInterfaceAttribute []any
+	if d.cfg.ResourceAttributes.HostInterface.Enabled {
+		interfaces, errInterfaces := d.provider.HostInterfaces()
+		if errInterfaces != nil {
+			return pcommon.NewResource(), "", fmt.Errorf("failed to get host network interfaces: %w", errInterfaces)
+		}
+		for _, iface := range interfaces {
+			hostInterfaceAttribute = append(hostInterfaceAttribute, iface.Name)
+		}
+	}
+
 	osDescription, err := d.provider.OSDescription(ctx)
 	if err != nil {
 		return pcommon.NewResource(), "", fmt.Errorf("failed getting OS description: %w", err)
@@ -146,6 +152,7 @@ func (d *Detector) Detect(ctx context.Context) (resource pcommon.Resource, schem
 		if err == nil {
 			d.rb.SetHostName(hostname)
 			d.rb.SetOsType(osType)
+			d.rb.SetOsVersion(osVersion)
 			if d.cfg.ResourceAttributes.HostID.Enabled {
 				if hostID, hostIDErr := d.provider.HostID(ctx); hostIDErr == nil {
 					d.rb.SetHostID(hostID)
@@ -156,7 +163,22 @@ func (d *Detector) Detect(ctx context.Context) (resource pcommon.Resource, schem
 			d.rb.SetHostArch(hostArch)
 			d.rb.SetHostIP(hostIPAttribute)
 			d.rb.SetHostMac(hostMACAttribute)
+			d.rb.SetHostInterface(hostInterfaceAttribute)
 			d.rb.SetOsDescription(osDescription)
+			if d.cfg.ResourceAttributes.OsName.Enabled {
+				if osName, err2 := d.provider.OSName(ctx); err2 == nil {
+					d.rb.SetOsName(osName)
+				} else {
+					d.logger.Warn("failed to get OS name", zap.Error(err2))
+				}
+			}
+			if d.cfg.ResourceAttributes.OsBuildID.Enabled {
+				if osBuildID, err2 := d.provider.OSBuildID(ctx); err2 == nil {
+					d.rb.SetOsBuildID(osBuildID)
+				} else {
+					d.logger.Warn("failed to get OS build id", zap.Error(err2))
+				}
+			}
 			if len(cpuInfo) > 0 {
 				setHostCPUInfo(d, cpuInfo[0])
 			}
@@ -215,15 +237,6 @@ func setHostCPUInfo(d *Detector, cpuInfo cpu.InfoStat) {
 	}
 
 	d.rb.SetHostCPUModelName(cpuInfo.ModelName)
-	if hostCPUSteppingAsStringFeatureGate.IsEnabled() {
-		d.rb.SetHostCPUStepping(fmt.Sprintf("%d", cpuInfo.Stepping))
-	} else {
-		// https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/31136
-		d.logger.Info("This attribute will change from int to string. Switch now using the feature gate.",
-			zap.String("attribute", "host.cpu.stepping"),
-			zap.String("feature gate", hostCPUSteppingAsStringID),
-		)
-		d.rb.SetHostCPUSteppingAsInt(int64(cpuInfo.Stepping))
-	}
+	d.rb.SetHostCPUStepping(fmt.Sprintf("%d", cpuInfo.Stepping))
 	d.rb.SetHostCPUCacheL2Size(int64(cpuInfo.CacheSize))
 }

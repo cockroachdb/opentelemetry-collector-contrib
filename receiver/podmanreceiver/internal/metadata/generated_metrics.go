@@ -12,6 +12,60 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 )
 
+var MetricsInfo = metricsInfo{
+	ContainerBlockioIoServiceBytesRecursiveRead: metricInfo{
+		Name: "container.blockio.io_service_bytes_recursive.read",
+	},
+	ContainerBlockioIoServiceBytesRecursiveWrite: metricInfo{
+		Name: "container.blockio.io_service_bytes_recursive.write",
+	},
+	ContainerCPUPercent: metricInfo{
+		Name: "container.cpu.percent",
+	},
+	ContainerCPUUsagePercpu: metricInfo{
+		Name: "container.cpu.usage.percpu",
+	},
+	ContainerCPUUsageSystem: metricInfo{
+		Name: "container.cpu.usage.system",
+	},
+	ContainerCPUUsageTotal: metricInfo{
+		Name: "container.cpu.usage.total",
+	},
+	ContainerMemoryPercent: metricInfo{
+		Name: "container.memory.percent",
+	},
+	ContainerMemoryUsageLimit: metricInfo{
+		Name: "container.memory.usage.limit",
+	},
+	ContainerMemoryUsageTotal: metricInfo{
+		Name: "container.memory.usage.total",
+	},
+	ContainerNetworkIoUsageRxBytes: metricInfo{
+		Name: "container.network.io.usage.rx_bytes",
+	},
+	ContainerNetworkIoUsageTxBytes: metricInfo{
+		Name: "container.network.io.usage.tx_bytes",
+	},
+}
+
+type metricsInfo struct {
+	ContainerBlockioIoServiceBytesRecursiveRead  metricInfo
+	ContainerBlockioIoServiceBytesRecursiveWrite metricInfo
+	ContainerCPUPercent                          metricInfo
+	ContainerCPUUsagePercpu                      metricInfo
+	ContainerCPUUsageSystem                      metricInfo
+	ContainerCPUUsageTotal                       metricInfo
+	ContainerMemoryPercent                       metricInfo
+	ContainerMemoryUsageLimit                    metricInfo
+	ContainerMemoryUsageTotal                    metricInfo
+	ContainerNetworkIoUsageRxBytes               metricInfo
+	ContainerNetworkIoUsageTxBytes               metricInfo
+}
+
+type metricInfo struct {
+	Name string
+}
+
 type metricContainerBlockioIoServiceBytesRecursiveRead struct {
 	data     pmetric.Metric // data buffer for generated metric.
 	config   MetricConfig   // metric config provided by user.
@@ -594,17 +648,24 @@ type MetricsBuilder struct {
 	metricContainerNetworkIoUsageTxBytes               metricContainerNetworkIoUsageTxBytes
 }
 
-// metricBuilderOption applies changes to default metrics builder.
-type metricBuilderOption func(*MetricsBuilder)
-
-// WithStartTime sets startTime on the metrics builder.
-func WithStartTime(startTime pcommon.Timestamp) metricBuilderOption {
-	return func(mb *MetricsBuilder) {
-		mb.startTime = startTime
-	}
+// MetricBuilderOption applies changes to default metrics builder.
+type MetricBuilderOption interface {
+	apply(*MetricsBuilder)
 }
 
-func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, options ...metricBuilderOption) *MetricsBuilder {
+type metricBuilderOptionFunc func(mb *MetricsBuilder)
+
+func (mbof metricBuilderOptionFunc) apply(mb *MetricsBuilder) {
+	mbof(mb)
+}
+
+// WithStartTime sets startTime on the metrics builder.
+func WithStartTime(startTime pcommon.Timestamp) MetricBuilderOption {
+	return metricBuilderOptionFunc(func(mb *MetricsBuilder) {
+		mb.startTime = startTime
+	})
+}
+func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, options ...MetricBuilderOption) *MetricsBuilder {
 	mb := &MetricsBuilder{
 		config:        mbc,
 		startTime:     pcommon.NewTimestampFromTime(time.Now()),
@@ -650,7 +711,7 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 	}
 
 	for _, op := range options {
-		op(mb)
+		op.apply(mb)
 	}
 	return mb
 }
@@ -668,20 +729,28 @@ func (mb *MetricsBuilder) updateCapacity(rm pmetric.ResourceMetrics) {
 }
 
 // ResourceMetricsOption applies changes to provided resource metrics.
-type ResourceMetricsOption func(pmetric.ResourceMetrics)
+type ResourceMetricsOption interface {
+	apply(pmetric.ResourceMetrics)
+}
+
+type resourceMetricsOptionFunc func(pmetric.ResourceMetrics)
+
+func (rmof resourceMetricsOptionFunc) apply(rm pmetric.ResourceMetrics) {
+	rmof(rm)
+}
 
 // WithResource sets the provided resource on the emitted ResourceMetrics.
 // It's recommended to use ResourceBuilder to create the resource.
 func WithResource(res pcommon.Resource) ResourceMetricsOption {
-	return func(rm pmetric.ResourceMetrics) {
+	return resourceMetricsOptionFunc(func(rm pmetric.ResourceMetrics) {
 		res.CopyTo(rm.Resource())
-	}
+	})
 }
 
 // WithStartTimeOverride overrides start time for all the resource metrics data points.
 // This option should be only used if different start time has to be set on metrics coming from different resources.
 func WithStartTimeOverride(start pcommon.Timestamp) ResourceMetricsOption {
-	return func(rm pmetric.ResourceMetrics) {
+	return resourceMetricsOptionFunc(func(rm pmetric.ResourceMetrics) {
 		var dps pmetric.NumberDataPointSlice
 		metrics := rm.ScopeMetrics().At(0).Metrics()
 		for i := 0; i < metrics.Len(); i++ {
@@ -695,7 +764,7 @@ func WithStartTimeOverride(start pcommon.Timestamp) ResourceMetricsOption {
 				dps.At(j).SetStartTimestamp(start)
 			}
 		}
-	}
+	})
 }
 
 // EmitForResource saves all the generated metrics under a new resource and updates the internal state to be ready for
@@ -703,10 +772,10 @@ func WithStartTimeOverride(start pcommon.Timestamp) ResourceMetricsOption {
 // needs to emit metrics from several resources. Otherwise calling this function is not required,
 // just `Emit` function can be called instead.
 // Resource attributes should be provided as ResourceMetricsOption arguments.
-func (mb *MetricsBuilder) EmitForResource(rmo ...ResourceMetricsOption) {
+func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	rm := pmetric.NewResourceMetrics()
 	ils := rm.ScopeMetrics().AppendEmpty()
-	ils.Scope().SetName("github.com/open-telemetry/opentelemetry-collector-contrib/receiver/podmanreceiver")
+	ils.Scope().SetName(ScopeName)
 	ils.Scope().SetVersion(mb.buildInfo.Version)
 	ils.Metrics().EnsureCapacity(mb.metricsCapacity)
 	mb.metricContainerBlockioIoServiceBytesRecursiveRead.emit(ils.Metrics())
@@ -721,8 +790,8 @@ func (mb *MetricsBuilder) EmitForResource(rmo ...ResourceMetricsOption) {
 	mb.metricContainerNetworkIoUsageRxBytes.emit(ils.Metrics())
 	mb.metricContainerNetworkIoUsageTxBytes.emit(ils.Metrics())
 
-	for _, op := range rmo {
-		op(rm)
+	for _, op := range options {
+		op.apply(rm)
 	}
 	for attr, filter := range mb.resourceAttributeIncludeFilter {
 		if val, ok := rm.Resource().Attributes().Get(attr); ok && !filter.Matches(val.AsString()) {
@@ -744,8 +813,8 @@ func (mb *MetricsBuilder) EmitForResource(rmo ...ResourceMetricsOption) {
 // Emit returns all the metrics accumulated by the metrics builder and updates the internal state to be ready for
 // recording another set of metrics. This function will be responsible for applying all the transformations required to
 // produce metric representation defined in metadata and user config, e.g. delta or cumulative.
-func (mb *MetricsBuilder) Emit(rmo ...ResourceMetricsOption) pmetric.Metrics {
-	mb.EmitForResource(rmo...)
+func (mb *MetricsBuilder) Emit(options ...ResourceMetricsOption) pmetric.Metrics {
+	mb.EmitForResource(options...)
 	metrics := mb.metricsBuffer
 	mb.metricsBuffer = pmetric.NewMetrics()
 	return metrics
@@ -808,9 +877,9 @@ func (mb *MetricsBuilder) RecordContainerNetworkIoUsageTxBytesDataPoint(ts pcomm
 
 // Reset resets metrics builder to its initial state. It should be used when external metrics source is restarted,
 // and metrics builder should update its startTime and reset it's internal state accordingly.
-func (mb *MetricsBuilder) Reset(options ...metricBuilderOption) {
+func (mb *MetricsBuilder) Reset(options ...MetricBuilderOption) {
 	mb.startTime = pcommon.NewTimestampFromTime(time.Now())
 	for _, op := range options {
-		op(mb)
+		op.apply(mb)
 	}
 }

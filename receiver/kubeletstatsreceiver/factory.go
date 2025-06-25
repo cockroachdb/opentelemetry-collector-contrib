@@ -9,8 +9,9 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/collector/receiver/scraperhelper"
+	"go.opentelemetry.io/collector/scraper/scraperhelper"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/k8sconfig"
@@ -20,7 +21,16 @@ import (
 )
 
 const (
-	metricGroupsConfig = "metric_groups"
+	metricGroupsConfig               = "metric_groups"
+	enableCPUUsageMetricsFeatureFlag = "receiver.kubeletstats.enableCPUUsageMetrics"
+)
+
+var EnableCPUUsageMetrics = featuregate.GlobalRegistry().MustRegister(
+	enableCPUUsageMetricsFeatureFlag,
+	featuregate.StageBeta,
+	featuregate.WithRegisterDescription("When enabled the container.cpu.utilization, k8s.pod.cpu.utilization and k8s.node.cpu.utilization metrics will be replaced by the container.cpu.usage, k8s.pod.cpu.usage and k8s.node.cpu.usage"),
+	featuregate.WithRegisterFromVersion("v0.110.0"),
+	featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/27885"),
 )
 
 var defaultMetricGroups = []kubelet.MetricGroup{
@@ -68,12 +78,12 @@ func createMetricsReceiver(
 		return nil, err
 	}
 
-	scrp, err := newKubletScraper(rest, set, rOptions, cfg.MetricsBuilderConfig, cfg.NodeName)
+	scrp, err := newKubeletScraper(rest, set, rOptions, cfg.MetricsBuilderConfig, cfg.NodeName)
 	if err != nil {
 		return nil, err
 	}
 
-	return scraperhelper.NewScraperControllerReceiver(&cfg.ControllerConfig, set, consumer, scraperhelper.AddScraper(scrp))
+	return scraperhelper.NewMetricsController(&cfg.ControllerConfig, set, consumer, scraperhelper.AddScraper(metadata.Type, scrp))
 }
 
 func restClient(logger *zap.Logger, cfg *Config) (kubelet.RestClient, error) {

@@ -11,6 +11,9 @@ resourceMetrics:
                     - key: client
                       value:
                         stringValue: foo-server
+                    - key: client_messaging.system
+                      value:
+                        stringValue: kafka
                     - key: connection_type
                       value:
                         stringValue: ""
@@ -20,12 +23,31 @@ resourceMetrics:
                     - key: server
                       value:
                         stringValue: bar-requester
-                    - key: client_messaging.system
-                      value:
-                        stringValue: kafka
                     - key: server_db.system
                       value:
                         stringValue: postgresql
+                  startTimeUnixNano: "1000000"
+                  timeUnixNano: "2000000"
+                - asInt: "1"
+                  attributes:
+                    - key: client
+                      value:
+                        stringValue: foo-server
+                    - key: client_messaging.system
+                      value:
+                        stringValue: rabbitmq
+                    - key: connection_type
+                      value:
+                        stringValue: ""
+                    - key: failed
+                      value:
+                        boolValue: false
+                    - key: server
+                      value:
+                        stringValue: bar-requester
+                    - key: server_db.system
+                      value:
+                        stringValue: mysql
                   startTimeUnixNano: "1000000"
                   timeUnixNano: "2000000"
               isMonotonic: true
@@ -36,6 +58,9 @@ resourceMetrics:
                     - key: client
                       value:
                         stringValue: foo-server
+                    - key: client_messaging.system
+                      value:
+                        stringValue: kafka
                     - key: connection_type
                       value:
                         stringValue: ""
@@ -45,9 +70,6 @@ resourceMetrics:
                     - key: server
                       value:
                         stringValue: bar-requester
-                    - key: client_messaging.system
-                      value:
-                        stringValue: kafka
                     - key: server_db.system
                       value:
                         stringValue: postgresql
@@ -62,9 +84,42 @@ resourceMetrics:
                     - 1
                     - 10
                   startTimeUnixNano: "1000000"
-                  sum: 0.000001
+                  sum: 1e-06
                   timeUnixNano: "2000000"
-            name: traces_service_graph_request_server_seconds
+                - attributes:
+                    - key: client
+                      value:
+                        stringValue: foo-server
+                    - key: client_messaging.system
+                      value:
+                        stringValue: rabbitmq
+                    - key: connection_type
+                      value:
+                        stringValue: ""
+                    - key: failed
+                      value:
+                        boolValue: false
+                    - key: server
+                      value:
+                        stringValue: bar-requester
+                    - key: server_db.system
+                      value:
+                        stringValue: mysql
+                  bucketCounts:
+                    - "1"
+                    - "0"
+                    - "0"
+                    - "0"
+                  count: "1"
+                  explicitBounds:
+                    - 0.1
+                    - 1
+                    - 10
+                  startTimeUnixNano: "1000000"
+                  sum: 1e-06
+                  timeUnixNano: "2000000"
+            name: traces_service_graph_request_server
+            unit: s
           - histogram:
               aggregationTemporality: 2
               dataPoints:
@@ -72,6 +127,9 @@ resourceMetrics:
                     - key: client
                       value:
                         stringValue: foo-server
+                    - key: client_messaging.system
+                      value:
+                        stringValue: kafka
                     - key: connection_type
                       value:
                         stringValue: ""
@@ -81,9 +139,6 @@ resourceMetrics:
                     - key: server
                       value:
                         stringValue: bar-requester
-                    - key: client_messaging.system
-                      value:
-                        stringValue: kafka
                     - key: server_db.system
                       value:
                         stringValue: postgresql
@@ -98,8 +153,41 @@ resourceMetrics:
                     - 1
                     - 10
                   startTimeUnixNano: "1000000"
-                  sum: 0.000001
+                  sum: 1e-06
                   timeUnixNano: "2000000"
-            name: traces_service_graph_request_client_seconds
+                - attributes:
+                    - key: client
+                      value:
+                        stringValue: foo-server
+                    - key: client_messaging.system
+                      value:
+                        stringValue: rabbitmq
+                    - key: connection_type
+                      value:
+                        stringValue: ""
+                    - key: failed
+                      value:
+                        boolValue: false
+                    - key: server
+                      value:
+                        stringValue: bar-requester
+                    - key: server_db.system
+                      value:
+                        stringValue: mysql
+                  bucketCounts:
+                    - "1"
+                    - "0"
+                    - "0"
+                    - "0"
+                  count: "1"
+                  explicitBounds:
+                    - 0.1
+                    - 1
+                    - 10
+                  startTimeUnixNano: "1000000"
+                  sum: 1e-06
+                  timeUnixNano: "2000000"
+            name: traces_service_graph_request_client
+            unit: s
         scope:
           name: traces_service_graph
