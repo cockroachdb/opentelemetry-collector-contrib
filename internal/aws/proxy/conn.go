@@ -42,10 +42,22 @@ const (
 	stsAwsCnPartitionIDSuffix = ".amazonaws.com.cn" // AWS China partition.
 )
 
-var newAWSSession = func(roleArn string, region string, log *zap.Logger) (*session.Session, error) {
+var newAWSSession = func(roleArn string, sharedCredentialsFile string, region string, log *zap.Logger) (*session.Session, error) {
 	sts := &stsCalls{log: log, getSTSCredsFromRegionEndpoint: getSTSCredsFromRegionEndpoint}
 
-	if roleArn == "" {
+	var s *session.Session
+	var err error
+	if sharedCredentialsFile != "" {
+		// profile defaults to "default" or the "AWS_PROFILE" environment variable.
+		sharedCreds := credentials.NewSharedCredentials(sharedCredentialsFile, "" /* profile */)
+		s, err = session.NewSession(&aws.Config{
+			Credentials: sharedCreds,
+		})
+		if err != nil {
+			log.Error("Error in creating session object via sharedCredentialsFile: ", zap.Error(err))
+			return s, err
+		}
+	} else if roleArn == "" {
 		sess, err := session.NewSession()
 		if err != nil {
 			return nil, err
