@@ -6,10 +6,12 @@ package awss3exporter // import "github.com/open-telemetry/opentelemetry-collect
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -18,6 +20,41 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awss3exporter/internal/upload"
 )
+
+// RecalculateV4Signature is an HTTP round-tripper middleware that re-signs
+// requests for GCS's S3-compatible API. GCS rejects requests containing
+// AWS-specific headers (X-Amz-Storage-Class, Content-Encoding) in the
+// signature, so this middleware strips them and re-signs before sending.
+type RecalculateV4Signature struct {
+	next   http.RoundTripper
+	signer *v4.Signer
+	cfg    aws.Config
+}
+
+func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, error) {
+	acceptEncoding := req.Header.Get("Accept-Encoding")
+	req.Header.Del("Accept-Encoding")
+	req.Header.Del("Content-Encoding")
+	req.Header.Del("X-Amz-Storage-Class")
+
+	timeString := req.Header.Get("X-Amz-Date")
+	timeDate, err := time.Parse("20060102T150405Z", timeString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse X-Amz-Date header %q: %w", timeString, err)
+	}
+
+	creds, err := lt.cfg.Credentials.Retrieve(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve credentials for GCS re-signing: %w", err)
+	}
+
+	if err := lt.signer.SignHTTP(req.Context(), creds, req, v4.GetPayloadHash(req.Context()), "s3", lt.cfg.Region, timeDate); err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept-Encoding", acceptEncoding)
+	return lt.next.RoundTrip(req)
+}
 
 func newUploadManager(
 	ctx context.Context,
@@ -97,6 +134,19 @@ func newUploadManager(
 		}
 	} else {
 		s3PartitionTimeLocation = time.Local
+	}
+
+	// When targeting GCS via its S3-compatible API, wrap the HTTP client to
+	// strip AWS-specific headers and re-sign requests.
+	if conf.S3Uploader.Endpoint == "https://storage.googleapis.com" {
+		cfg.HTTPClient = &http.Client{
+			Transport: &RecalculateV4Signature{
+				next:   http.DefaultTransport,
+				signer: v4.NewSigner(),
+				cfg:    cfg,
+			},
+		}
+		cfg.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	}
 
 	return upload.NewS3Manager(
