@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -136,9 +138,20 @@ func newUploadManager(
 		s3PartitionTimeLocation = time.Local
 	}
 
-	// When targeting GCS via its S3-compatible API, wrap the HTTP client to
-	// strip AWS-specific headers and re-sign requests.
+	// When targeting GCS via its S3-compatible API, use dedicated GCS HMAC
+	// credentials (GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY) instead of the
+	// default AWS credential chain. This prevents conflicts with AWS IRSA
+	// credentials when both S3 and GCS exporters run in the same pod.
+	// The HTTP client is wrapped to strip AWS-specific headers and re-sign
+	// requests for GCS compatibility.
 	if conf.S3Uploader.Endpoint == "https://storage.googleapis.com" {
+		gcsAccessKey := os.Getenv("GCS_ACCESS_KEY_ID")
+		gcsSecretKey := os.Getenv("GCS_SECRET_ACCESS_KEY")
+		if gcsAccessKey == "" || gcsSecretKey == "" {
+			return nil, fmt.Errorf("GCS endpoint requires GCS_ACCESS_KEY_ID and GCS_SECRET_ACCESS_KEY environment variables")
+		}
+		cfg.Credentials = credentials.NewStaticCredentialsProvider(gcsAccessKey, gcsSecretKey, "")
+
 		cfg.HTTPClient = &http.Client{
 			Transport: &RecalculateV4Signature{
 				next:   http.DefaultTransport,
