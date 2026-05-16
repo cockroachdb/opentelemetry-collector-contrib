@@ -44,34 +44,49 @@ func isPatternValid(s string) (bool, string) {
 	return true, ""
 }
 
-func replacePatterns(s string, attrMap map[string]string, logger *zap.Logger) (string, bool) {
+// defaultEmptyPatternValue is the historical substitution emitted when a
+// placeholder resolves to a missing or empty resource attribute. Preserved
+// when Config.EmptyPatternValue is nil to keep upstream behavior unchanged.
+const defaultEmptyPatternValue = "undefined"
+
+// emptyPatternValue returns the substitution string to use for missing/empty
+// placeholder values. Honors Config.EmptyPatternValue when non-nil (including
+// an explicit empty string); otherwise falls back to the historical default.
+func emptyPatternValue(emptyValue *string) string {
+	if emptyValue != nil {
+		return *emptyValue
+	}
+	return defaultEmptyPatternValue
+}
+
+func replacePatterns(s string, attrMap map[string]string, emptyValue *string, logger *zap.Logger) (string, bool) {
 	success := true
 	var foundAndReplaced bool
 	for key := range patternKeyToAttributeMap {
-		s, foundAndReplaced = replacePatternWithAttrValue(s, key, attrMap, logger)
+		s, foundAndReplaced = replacePatternWithAttrValue(s, key, attrMap, emptyValue, logger)
 		success = success && foundAndReplaced
 	}
 	return s, success
 }
 
-func replacePatternWithAttrValue(s, patternKey string, attrMap map[string]string, logger *zap.Logger) (string, bool) {
+func replacePatternWithAttrValue(s, patternKey string, attrMap map[string]string, emptyValue *string, logger *zap.Logger) (string, bool) {
 	pattern := "{" + patternKey + "}"
 	if strings.Contains(s, pattern) {
 		if value, ok := attrMap[patternKey]; ok {
-			return replace(s, pattern, value, logger)
+			return replace(s, pattern, value, emptyValue, logger)
 		} else if value, ok := attrMap[patternKeyToAttributeMap[patternKey]]; ok {
-			return replace(s, pattern, value, logger)
+			return replace(s, pattern, value, emptyValue, logger)
 		}
 		logger.Debug("No resource attribute found for pattern " + pattern)
-		return strings.ReplaceAll(s, pattern, "undefined"), false
+		return strings.ReplaceAll(s, pattern, emptyPatternValue(emptyValue)), false
 	}
 	return s, true
 }
 
-func replace(s, pattern, value string, logger *zap.Logger) (string, bool) {
+func replace(s, pattern, value string, emptyValue *string, logger *zap.Logger) (string, bool) {
 	if value == "" {
 		logger.Debug("Empty resource attribute value found for pattern " + pattern)
-		return strings.ReplaceAll(s, pattern, "undefined"), false
+		return strings.ReplaceAll(s, pattern, emptyPatternValue(emptyValue)), false
 	}
 	return strings.ReplaceAll(s, pattern, value), true
 }
@@ -87,10 +102,10 @@ func getLogInfo(resourceAttrs map[string]any, config *Config) (string, string, b
 
 	// Override log group/stream if specified in config. However, in this case, customer won't have correlation experience
 	if config.LogGroupName != "" {
-		logGroup, groupReplaced = replacePatterns(config.LogGroupName, strAttributeMap, config.logger)
+		logGroup, groupReplaced = replacePatterns(config.LogGroupName, strAttributeMap, config.EmptyPatternValue, config.logger)
 	}
 	if config.LogStreamName != "" {
-		logStream, streamReplaced = replacePatterns(config.LogStreamName, strAttributeMap, config.logger)
+		logStream, streamReplaced = replacePatterns(config.LogStreamName, strAttributeMap, config.EmptyPatternValue, config.logger)
 	}
 
 	return logGroup, logStream, (groupReplaced && streamReplaced)
