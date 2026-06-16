@@ -34,6 +34,7 @@ type s3manager struct {
 	uploader     *manager.Uploader
 	storageClass s3types.StorageClass
 	acl          s3types.ObjectCannedACL
+	contentType  string
 }
 
 var _ Manager = (*s3manager)(nil)
@@ -95,6 +96,9 @@ func (sw *s3manager) Upload(ctx context.Context, data []byte, opts *UploadOption
 	if encoding != "" {
 		uploadInput.ContentEncoding = aws.String(encoding)
 	}
+	if sw.contentType != "" {
+		uploadInput.ContentType = aws.String(sw.contentType)
+	}
 
 	_, err = sw.uploader.Upload(ctx, uploadInput)
 	return err
@@ -142,5 +146,15 @@ func WithACL(acl s3types.ObjectCannedACL) func(Manager) {
 			return
 		}
 		s3m.acl = acl
+	}
+}
+
+func WithContentType(contentType string) func(Manager) {
+	return func(m Manager) {
+		s3m, ok := m.(*s3manager)
+		if !ok {
+			return
+		}
+		s3m.contentType = contentType
 	}
 }

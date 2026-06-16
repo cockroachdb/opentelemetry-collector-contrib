@@ -119,6 +119,9 @@ func newUploadManager(
 		managerOpts = append(managerOpts,
 			upload.WithACL(s3types.ObjectCannedACL(conf.S3Uploader.ACL)))
 	}
+	if conf.S3Uploader.ContentType != "" {
+		managerOpts = append(managerOpts, upload.WithContentType(conf.S3Uploader.ContentType))
+	}
 
 	var uniqueKeyFunc func() string
 	switch conf.S3Uploader.UniqueKeyFuncName {

@@ -9,6 +9,7 @@ exporters:
       s3_bucket: "foo"
       region: 'us-east-1'
       s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+      content_type: 'application/x-gzip'
 
 processors:
   nop:

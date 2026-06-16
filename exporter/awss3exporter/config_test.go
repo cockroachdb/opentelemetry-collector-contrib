@@ -46,6 +46,7 @@ func TestLoadConfig(t *testing.T) {
 			Region:            "us-east-1",
 			S3Bucket:          "foo",
 			S3PartitionFormat: "year=%Y/month=%m/day=%d/hour=%H/minute=%M",
+			ContentType:       "application/x-gzip",
 			StorageClass:      "STANDARD",
 			RetryMode:         DefaultRetryMode,
 			RetryMaxAttempts:  DefaultRetryMaxAttempts,
