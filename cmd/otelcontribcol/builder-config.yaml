@@ -73,6 +73,7 @@ exporters:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsxrayexporter v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuredataexplorerexporter v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azureblobexporter v0.145.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azurelogsingestionexporter v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuremonitorexporter v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/bmchelixexporter v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter v0.145.0
