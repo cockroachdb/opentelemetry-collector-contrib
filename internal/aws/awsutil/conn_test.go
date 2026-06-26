@@ -6,6 +6,8 @@ package awsutil
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -102,6 +105,77 @@ func TestGetAWSConfigWithRetries(t *testing.T) {
 	assert.Equal(t, 5, cfg.RetryMaxAttempts)
 }
 
+func TestGetAWSConfigWithSharedCredentialsFileRefreshes(t *testing.T) {
+	origRefresh := sharedCredentialsFileRefreshInterval
+	sharedCredentialsFileRefreshInterval = 10 * time.Millisecond
+	t.Cleanup(func() {
+		sharedCredentialsFileRefreshInterval = origRefresh
+	})
+
+	credentialsFile := filepath.Join(t.TempDir(), "credentials")
+	writeSharedCredentialsFile(t, credentialsFile, "access-key-1", "secret-key-1", "session-token-1")
+
+	logger := zap.NewNop()
+	sessionCfg := CreateDefaultSessionConfig()
+	sessionCfg.Region = "us-west-2"
+	sessionCfg.SharedCredentialsFile = credentialsFile
+
+	cfg, err := GetAWSConfig(t.Context(), logger, &sessionCfg)
+	require.NoError(t, err)
+
+	creds, err := cfg.Credentials.Retrieve(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "access-key-1", creds.AccessKeyID)
+	require.Equal(t, "secret-key-1", creds.SecretAccessKey)
+	require.Equal(t, "session-token-1", creds.SessionToken)
+	require.True(t, creds.CanExpire)
+
+	writeSharedCredentialsFile(t, credentialsFile, "access-key-2", "secret-key-2", "session-token-2")
+	time.Sleep(20 * time.Millisecond)
+
+	creds, err = cfg.Credentials.Retrieve(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "access-key-2", creds.AccessKeyID)
+	require.Equal(t, "secret-key-2", creds.SecretAccessKey)
+	require.Equal(t, "session-token-2", creds.SessionToken)
+	require.True(t, creds.CanExpire)
+}
+
+func TestGetAWSConfigWithSharedCredentialsFileUsesLastGoodOnReloadError(t *testing.T) {
+	origRefresh := sharedCredentialsFileRefreshInterval
+	origFallback := sharedCredentialsFileFallbackRefresh
+	sharedCredentialsFileRefreshInterval = 10 * time.Millisecond
+	sharedCredentialsFileFallbackRefresh = 10 * time.Millisecond
+	t.Cleanup(func() {
+		sharedCredentialsFileRefreshInterval = origRefresh
+		sharedCredentialsFileFallbackRefresh = origFallback
+	})
+
+	credentialsFile := filepath.Join(t.TempDir(), "credentials")
+	writeSharedCredentialsFile(t, credentialsFile, "access-key-1", "secret-key-1", "session-token-1")
+
+	logger := zap.NewNop()
+	sessionCfg := CreateDefaultSessionConfig()
+	sessionCfg.Region = "us-west-2"
+	sessionCfg.SharedCredentialsFile = credentialsFile
+
+	cfg, err := GetAWSConfig(t.Context(), logger, &sessionCfg)
+	require.NoError(t, err)
+
+	creds, err := cfg.Credentials.Retrieve(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "access-key-1", creds.AccessKeyID)
+
+	require.NoError(t, os.Remove(credentialsFile))
+	time.Sleep(20 * time.Millisecond)
+
+	creds, err = cfg.Credentials.Retrieve(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "access-key-1", creds.AccessKeyID)
+	require.Equal(t, "secret-key-1", creds.SecretAccessKey)
+	require.Equal(t, "session-token-1", creds.SessionToken)
+}
+
 // Test NewHTTPClient
 func TestNewHTTPClient(t *testing.T) {
 	logger := zap.NewNop()
@@ -141,6 +215,17 @@ func TestNewHTTPClient(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeSharedCredentialsFile(t *testing.T, filename, accessKeyID, secretAccessKey, sessionToken string) {
+	t.Helper()
+
+	contents := `[default]
+aws_access_key_id = ` + accessKeyID + `
+aws_secret_access_key = ` + secretAccessKey + `
+aws_session_token = ` + sessionToken + `
+`
+	require.NoError(t, os.WriteFile(filename, []byte(contents), 0o600))
 }
 
 // Test HTTP client with no SSL verification

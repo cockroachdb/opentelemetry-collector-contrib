@@ -118,6 +118,12 @@ func getAWSConfig(ctx context.Context, logger *zap.Logger, settings *AWSSessionS
 		return aws.Config{}, err
 	}
 
+	if settings.SharedCredentialsFile != "" {
+		cfg.Credentials = aws.NewCredentialsCache(
+			newSharedCredentialsFileProvider(settings.SharedCredentialsFile),
+		)
+	}
+
 	if settings.RoleARN != "" {
 		stsClient := getAssumeRoleAPIClient(cfg)
 
