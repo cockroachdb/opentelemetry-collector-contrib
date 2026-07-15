@@ -14,6 +14,7 @@ dist:
   output_path: ./cmd/otelcontribcol
 
 extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/publicegressextension v0.145.0
   - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/ackextension v0.145.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/asapauthextension v0.145.0
