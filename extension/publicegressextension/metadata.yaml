@@ -1,0 +1,13 @@
+type: public_egress
+display_name: Public Egress Extension
+
+status:
+  class: extension
+  stability:
+    development: [extension]
+  distributions: [contrib]
+  codeowners:
+    active: [ShashwatDash23]
+
+tests:
+  skip_lifecycle: true
