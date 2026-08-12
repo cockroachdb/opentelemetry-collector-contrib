@@ -31,6 +31,12 @@ func TestLoadConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	defaultBackOffConfig := configretry.NewDefaultBackOffConfig()
+	sharedCredentialsFileConfig := awsutil.CreateDefaultSessionConfig()
+	sharedCredentialsFileConfig.SharedCredentialsFile = "temp-file-path"
+	defaultQueueConfig := exporterhelper.NewDefaultQueueConfig()
+	defaultQueueConfig.NumConsumers = 1
+	shortQueueConfig := defaultQueueConfig
+	shortQueueConfig.QueueSize = 2
 
 	tests := []struct {
 		id           component.ID
@@ -45,11 +51,7 @@ func TestLoadConfig(t *testing.T) {
 				LogStreamName:      "testing",
 				Endpoint:           "",
 				AWSSessionSettings: awsutil.CreateDefaultSessionConfig(),
-				QueueSettings: configoptional.Some(func() exporterhelper.QueueBatchConfig {
-					queue := exporterhelper.NewDefaultQueueConfig()
-					queue.NumConsumers = 1
-					return queue
-				}()),
+				QueueSettings:      configoptional.Some(defaultQueueConfig),
 			},
 		},
 		{
@@ -66,12 +68,18 @@ func TestLoadConfig(t *testing.T) {
 				AWSSessionSettings: awsutil.CreateDefaultSessionConfig(),
 				LogGroupName:       "test-2",
 				LogStreamName:      "testing",
-				QueueSettings: configoptional.Some(func() exporterhelper.QueueBatchConfig {
-					queue := exporterhelper.NewDefaultQueueConfig()
-					queue.NumConsumers = 1
-					queue.QueueSize = 2
-					return queue
-				}()),
+				QueueSettings:      configoptional.Some(shortQueueConfig),
+			},
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "shared_credentials_file"),
+			expected: &Config{
+				BackOffConfig:      defaultBackOffConfig,
+				LogGroupName:       "test-1",
+				LogStreamName:      "testing",
+				Endpoint:           "",
+				AWSSessionSettings: sharedCredentialsFileConfig,
+				QueueSettings:      configoptional.Some(defaultQueueConfig),
 			},
 		},
 		{

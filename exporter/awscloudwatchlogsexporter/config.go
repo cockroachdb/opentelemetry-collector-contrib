@@ -53,6 +53,17 @@ type Config struct {
 	// Export raw log string instead of log wrapper
 	// Required for emf logs
 	RawLog bool `mapstructure:"raw_log,omitempty"`
+
+	// EmptyPatternValue controls the substitution emitted when a curly-bracket
+	// placeholder in log_group_name or log_stream_name (e.g. {ServiceName})
+	// resolves to a missing or empty resource attribute.
+	//
+	// nil (default): preserve historical behavior — substitute the literal
+	// string "undefined".
+	// non-nil: substitute the provided string instead. Set to "" to drop the
+	// placeholder entirely (useful for byte-compat with sinks that omit the
+	// segment rather than emitting a placeholder marker).
+	EmptyPatternValue *string `mapstructure:"empty_pattern_value,omitempty"`
 }
 
 var _ component.Config = (*Config)(nil)

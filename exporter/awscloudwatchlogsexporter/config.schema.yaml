@@ -1,6 +1,10 @@
 description: Config represent a configuration for the CloudWatch logs exporter.
 type: object
 properties:
+  empty_pattern_value:
+    description: EmptyPatternValue controls the substitution emitted when a curly-bracket placeholder in log_group_name or log_stream_name resolves to a missing or empty resource attribute. A null value preserves the historical "undefined" substitution; an explicit empty string drops the placeholder.
+    x-pointer: true
+    type: string
   endpoint:
     description: Endpoint is the CloudWatch Logs service endpoint which the requests are forwarded to. https://docs.aws.amazon.com/general/latest/gr/cwl_region.html e.g. logs.us-east-1.amazonaws.com Optional.
     type: string
