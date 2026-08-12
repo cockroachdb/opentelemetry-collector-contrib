@@ -306,6 +306,19 @@ func TestUnmarshal(t *testing.T) {
 		field     string
 	}{
 		{
+			name: "metrics interval",
+			configMap: confmap.NewFromStringMap(map[string]any{
+				"metrics": map[string]any{
+					"interval": int64(15),
+				},
+			}),
+			cfg: func() *Config {
+				cfg := CreateDefaultConfig().(*Config)
+				cfg.Metrics.ExporterConfig.Interval = 15
+				return cfg
+			}(),
+		},
+		{
 			name: "invalid cumulative monotonic mode",
 			configMap: confmap.NewFromStringMap(map[string]any{
 				"metrics": map[string]any{
