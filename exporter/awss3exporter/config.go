@@ -52,6 +52,8 @@ type S3UploaderConfig struct {
 	// before uploading to S3.
 	// Valid values are: `gzip`, `zstd`, or no value set.
 	Compression configcompression.Type `mapstructure:"compression"`
+	// ContentType sets the Content-Type metadata on uploaded objects.
+	ContentType string `mapstructure:"content_type"`
 
 	// RetryMode specifies the retry mode for S3 client, default is "standard".
 	// Valid values are: "standard", "adaptive", or "nop".

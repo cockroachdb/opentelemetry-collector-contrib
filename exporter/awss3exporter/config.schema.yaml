@@ -21,6 +21,9 @@ $defs:
       compression:
         description: 'Compression sets the algorithm used to process the payload before uploading to S3. Valid values are: `gzip`, `zstd`, or no value set.'
         $ref: go.opentelemetry.io/collector/config/configcompression.type
+      content_type:
+        description: ContentType sets the Content-Type metadata on uploaded objects.
+        type: string
       disable_ssl:
         description: DisableSLL forces communication to happen via HTTP instead of HTTPS.
         type: boolean

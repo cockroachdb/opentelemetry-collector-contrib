@@ -46,6 +46,7 @@ func TestS3ManagerUpload(t *testing.T) {
 		data         []byte
 		errVal       string
 		storageClass string
+		contentType  string
 		uploadOpts   *UploadOptions
 	}{
 		{
@@ -167,6 +168,21 @@ func TestS3ManagerUpload(t *testing.T) {
 			data:         []byte("some data"),
 			errVal:       "",
 			uploadOpts:   nil,
+		},
+		{
+			name: "upload with content type",
+			handler: func(t *testing.T) http.Handler {
+				return http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					_ = r.Body.Close()
+
+					assert.Equal(t, "application/x-gzip", r.Header.Get("Content-Type"))
+				})
+			},
+			contentType: "application/x-gzip",
+			data:        []byte("some data"),
+			errVal:      "",
+			uploadOpts:  nil,
 		},
 		{
 			name: "upload with s3 prefix from resource attrbuites",
@@ -317,6 +333,7 @@ func TestS3ManagerUpload(t *testing.T) {
 				}),
 				"STANDARD_IA",
 				WithACL(s3types.ObjectCannedACLPrivate),
+				WithContentType(tc.contentType),
 			)
 
 			// Using a mocked virtual clock to fix the timestamp used
