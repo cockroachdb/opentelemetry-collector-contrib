@@ -652,6 +652,48 @@ func TestAppendHistogramReturnsStableSeriesRef(t *testing.T) {
 	require.NotEqual(t, refA, refB)
 }
 
+func TestHighChurnJobsDoNotReturnSeriesRefs(t *testing.T) {
+	tr := newTxn(t, false)
+	ls := labels.FromStrings(
+		model.InstanceLabel, "localhost:1234",
+		model.JobLabel, "serverless-tenant",
+		model.MetricNameLabel, "tenant_metric",
+	)
+
+	ref, err := tr.Append(0, ls, ts, 1)
+	require.NoError(t, err)
+	require.Zero(t, ref)
+
+	ref, err = tr.AppendHistogram(0, ls, ts, tsdbutil.GenerateTestHistogram(1), nil)
+	require.NoError(t, err)
+	require.Zero(t, ref)
+
+	ref, err = tr.AppendSTZeroSample(0, ls, ts, ts-interval)
+	require.NoError(t, err)
+	require.Zero(t, ref)
+}
+
+func TestOrdinaryJobsRetainStableSeriesRefs(t *testing.T) {
+	tr := newTxn(t, false)
+	ls := labels.FromStrings(
+		model.InstanceLabel, "localhost:1234",
+		model.JobLabel, "cockroach",
+		model.MetricNameLabel, "stable_metric",
+	)
+
+	ref, err := tr.Append(0, ls, ts, 1)
+	require.NoError(t, err)
+	require.Equal(t, storage.SeriesRef(ls.Hash()), ref)
+
+	ref, err = tr.AppendHistogram(0, ls, ts, tsdbutil.GenerateTestHistogram(1), nil)
+	require.NoError(t, err)
+	require.Equal(t, storage.SeriesRef(ls.Hash()), ref)
+
+	ref, err = tr.AppendSTZeroSample(0, ls, ts, ts-interval)
+	require.NoError(t, err)
+	require.NotZero(t, ref)
+}
+
 func TestAppendHistogramStableSeriesRefEnablesSeriesDisappearanceTracking(t *testing.T) {
 	lsA := labels.FromStrings(
 		model.InstanceLabel, "localhost:1234",

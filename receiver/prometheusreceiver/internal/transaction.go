@@ -188,6 +188,13 @@ func (t *transaction) Append(_ storage.SeriesRef, ls labels.Labels, atMs int64, 
 		return 0, nil
 	}
 
+	// For high-churn tenant jobs, return ref=0 to prevent the Prometheus
+	// scrape cache from retaining entries for churned targets, which causes
+	// unbounded memory growth via context-held cache references.
+	if isHighChurnJob(rKey.job) {
+		return 0, nil
+	}
+
 	// never return errors, as that fails the whole scrape
 	// return a stable ref so Prometheus can track series staleness
 	return storage.SeriesRef(cacheRef), nil
@@ -359,6 +366,10 @@ func (t *transaction) AppendHistogram(_ storage.SeriesRef, ls labels.Labels, atM
 		return 0, nil
 	}
 
+	if isHighChurnJob(rKey.job) {
+		return 0, nil
+	}
+
 	// never return errors, as that fails the whole scrape
 	// return a stable ref so Prometheus can track series staleness
 	return storage.SeriesRef(cacheRef), nil
@@ -422,7 +433,18 @@ func (t *transaction) setStartTimestamp(ls labels.Labels, atMs, stMs int64) (sto
 	seriesRef := t.getSeriesRef(ls, curMF.mtype)
 	curMF.addCreationTimestamp(seriesRef, ls, atMs, stMs)
 
+	if isHighChurnJob(rKey.job) {
+		return 0, nil
+	}
+
 	return storage.SeriesRef(seriesRef), nil
+}
+
+// isHighChurnJob returns true for scrape jobs whose targets churn frequently.
+// Returning ref=0 for these jobs prevents the Prometheus scrape cache from
+// retaining entries that cause unbounded memory growth.
+func isHighChurnJob(job string) bool {
+	return strings.HasSuffix(job, "-tenant")
 }
 
 func (*transaction) SetOptions(_ *storage.AppendOptions) {
