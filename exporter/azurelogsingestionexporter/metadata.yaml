@@ -1,0 +1,13 @@
+type: azurelogsingestion
+display_name: Azure Logs Ingestion Exporter
+
+status:
+  class: exporter
+  stability:
+    alpha: [logs]
+  distributions: [contrib]
+  codeowners:
+    active: [ShashwatDash23]
+
+tests:
+  skip_lifecycle: true
