@@ -147,6 +147,25 @@ func TestDetectResource_Error_ContextDeadline_WithErrPropagation(t *testing.T) {
 	require.Contains(t, err.Error(), "err2")
 }
 
+func TestDetectResource_Error_ContextDeadline_WithoutErrPropagation(t *testing.T) {
+	require.NoError(t, featuregate.GlobalRegistry().Set(metadata.ProcessorResourcedetectionPropagateerrorsFeatureGate.ID(), false))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(metadata.ProcessorResourcedetectionPropagateerrorsFeatureGate.ID(), true))
+	})
+
+	md1 := &mockDetector{}
+	md1.On("Detect").Return(pcommon.NewResource(), "", errors.New("err1"))
+
+	md2 := &mockDetector{}
+	md2.On("Detect").Return(pcommon.NewResource(), "", errors.New("err2"))
+
+	p := NewResourceProvider(zap.NewNop(), time.Second, md1, md2)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+
+	require.NoError(t, p.Refresh(ctx, &http.Client{Timeout: 10 * time.Second}))
+}
+
 func TestMergeResource(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
