@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -373,6 +374,66 @@ func TestTCPInputAattributes(t *testing.T) {
 func TestTLSTCPInput(t *testing.T) {
 	t.Run("Simple", tlsInputTest([]byte("message\n"), []string{"message"}))
 	t.Run("CarriageReturn", tlsInputTest([]byte("message\r\n"), []string{"message"}))
+}
+
+// TestTCPInputTruncatesOversizedEntry verifies that an entry larger than
+// max_log_size is truncated rather than terminating the connection, and that
+// entries sent after it on the same connection are still received.
+func TestTCPInputTruncatesOversizedEntry(t *testing.T) {
+	cfg := NewConfigWithID("test_id")
+	cfg.ListenAddress = ":0"
+	cfg.MaxLogSize = minMaxLogSize
+
+	set := componenttest.NewNopTelemetrySettings()
+	op, err := cfg.Build(set)
+	require.NoError(t, err)
+
+	mockOutput := testutil.Operator{}
+	tcpInput := op.(*Input)
+	tcpInput.OutputOperators = []operator.Operator{&mockOutput}
+
+	entryChan := make(chan *entry.Entry, 4)
+	mockOutput.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		entryChan <- args.Get(1).(*entry.Entry)
+	}).Return(nil)
+
+	require.NoError(t, tcpInput.Start(testutil.NewUnscopedMockPersister()))
+	defer func() {
+		require.NoError(t, tcpInput.Stop(), "expected to stop tcp input operator without error")
+	}()
+
+	conn, err := net.Dial("tcp", tcpInput.listener.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// The oversized entry spans several scanner buffers so that discarding
+	// has to continue across multiple split calls before the newline is found.
+	oversized := strings.Repeat("a", 3*minMaxLogSize+17)
+	_, err = conn.Write([]byte("before\n" + oversized + "\nafter\n"))
+	require.NoError(t, err)
+
+	expectEntry := func(expected string) {
+		select {
+		case e := <-entryChan:
+			require.Equal(t, expected, e.Body)
+		case <-time.After(time.Second):
+			require.FailNow(t, "Timed out waiting for message to be written")
+		}
+	}
+	expectEntry("before")
+	expectEntry(oversized[:minMaxLogSize])
+	expectEntry("after")
+
+	// The connection must still be usable after the oversized entry.
+	_, err = conn.Write([]byte("still connected\n"))
+	require.NoError(t, err)
+	expectEntry("still connected")
+
+	select {
+	case e := <-entryChan:
+		require.FailNow(t, fmt.Sprintf("Unexpected entry: %s", e))
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 func TestFailToBind(t *testing.T) {
