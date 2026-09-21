@@ -25,6 +25,11 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
 )
 
+// initialScannerBufferSize is the initial size of the per-connection scanner
+// buffer. It matches the minimum allowed max_log_size, so the buffer only grows
+// for connections that actually carry larger entries.
+const initialScannerBufferSize = 64 * 1024
+
 // Input is an operator that listens for log entries over tcp.
 type Input struct {
 	helper.InputOperator
@@ -131,12 +136,15 @@ func (i *Input) goHandleMessages(ctx context.Context, conn net.Conn, cancel cont
 			return
 		}
 
-		buf := make([]byte, 0, i.MaxLogSize)
+		// Start with a small buffer and let the scanner grow it on demand, up
+		// to MaxLogSize. Allocating MaxLogSize up front makes every connection
+		// pay for the largest entry the receiver is configured to accept.
+		buf := make([]byte, 0, min(i.MaxLogSize, initialScannerBufferSize))
 
 		scanner := bufio.NewScanner(conn)
 		scanner.Buffer(buf, i.MaxLogSize)
 
-		scanner.Split(i.splitFunc)
+		scanner.Split(i.truncatingSplitFunc())
 
 		for scanner.Scan() {
 			i.handleMessage(ctx, conn, dec, scanner.Bytes())
@@ -146,6 +154,61 @@ func (i *Input) goHandleMessages(ctx context.Context, conn net.Conn, cancel cont
 			i.Logger().Error("Scanner error", zap.Error(err))
 		}
 	})
+}
+
+// truncatingSplitFunc wraps i.splitFunc so that an entry larger than MaxLogSize
+// is truncated to MaxLogSize and the rest of it discarded, instead of failing
+// the scanner with bufio.ErrTooLong. A scanner error ends the connection, which
+// discards everything the client has already sent on it and forces the client
+// to reconnect, so a single oversized entry would otherwise take unrelated
+// entries down with it.
+//
+// The returned function carries per-connection state and must not be shared
+// between scanners.
+func (i *Input) truncatingSplitFunc() bufio.SplitFunc {
+	discarding := false
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		advance, token, err = i.splitFunc(data, atEOF)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		if discarding {
+			if advance == 0 {
+				if len(data) >= i.MaxLogSize || atEOF {
+					return len(data), nil, nil
+				}
+				return 0, nil, nil
+			}
+			// The wrapped split func found the end of the oversized entry.
+			// Drop the remainder and split whatever follows it in this same
+			// call: when no token is returned, bufio.Scanner reads more data
+			// before calling the split func again, which would stall on an
+			// idle connection even though a complete entry is already
+			// buffered.
+			discarding = false
+			next, token, err := i.splitFunc(data[advance:], atEOF)
+			if err != nil {
+				return 0, nil, err
+			}
+			return advance + next, token, nil
+		}
+
+		if advance > 0 || token != nil {
+			return advance, token, nil
+		}
+
+		// The wrapped split func asked for more data. Once the buffer has
+		// grown to MaxLogSize the scanner would fail with ErrTooLong, so
+		// emit what we have as a truncated entry and skip to the next one.
+		if len(data) >= i.MaxLogSize {
+			i.Logger().Warn("Log entry exceeds max_log_size, truncating",
+				zap.Int("max_log_size", i.MaxLogSize))
+			discarding = true
+			return len(data), data[:i.MaxLogSize], nil
+		}
+		return 0, nil, nil
+	}
 }
 
 func (i *Input) handleMessage(ctx context.Context, conn net.Conn, dec *encoding.Decoder, log []byte) {
