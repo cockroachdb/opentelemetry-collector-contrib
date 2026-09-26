@@ -8,7 +8,7 @@ The `tcp_input` operator listens for logs on one or more TCP connections. The op
 | ---                                     | ---                  | ---         |
 | `id`                                    | `tcp_input`          | A unique identifier for the operator. |
 | `output`                                | Next in pipeline     | The connected operator(s) that will receive all outbound entries. |
-| `max_log_size`                          | `1MiB`               | The maximum size of a log entry to read. Larger entries are truncated to this size. Protects against reading large amounts of data into memory. |
+| `max_log_size`                          | `1MiB`               | The maximum size of a log entry to read. Larger entries are truncated to this size and carry the attribute `log.record.truncated: true`. Protects against reading large amounts of data into memory. |
 | `listen_address`                        | required             | A listen address of the form `<ip>:<port>`. |
 | `tls`                                   | nil                  | An optional `TLS` configuration (see the TLS configuration section). |
 | `attributes`                            | {}                   | A map of `key: value` pairs to add to the entry's attributes. |

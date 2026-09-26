@@ -14,15 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/entry"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configtls"
-
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/entry"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/testutil"
 )
 
 const testTLSPrivateKey = `
@@ -412,22 +411,27 @@ func TestTCPInputTruncatesOversizedEntry(t *testing.T) {
 	_, err = conn.Write([]byte("before\n" + oversized + "\nafter\n"))
 	require.NoError(t, err)
 
-	expectEntry := func(expected string) {
+	expectEntry := func(expected string, truncated bool) {
 		select {
 		case e := <-entryChan:
 			require.Equal(t, expected, e.Body)
+			if truncated {
+				require.Equal(t, true, e.Attributes[TruncatedAttribute])
+			} else {
+				require.NotContains(t, e.Attributes, TruncatedAttribute)
+			}
 		case <-time.After(time.Second):
 			require.FailNow(t, "Timed out waiting for message to be written")
 		}
 	}
-	expectEntry("before")
-	expectEntry(oversized[:minMaxLogSize])
-	expectEntry("after")
+	expectEntry("before", false)
+	expectEntry(oversized[:minMaxLogSize], true)
+	expectEntry("after", false)
 
 	// The connection must still be usable after the oversized entry.
 	_, err = conn.Write([]byte("still connected\n"))
 	require.NoError(t, err)
-	expectEntry("still connected")
+	expectEntry("still connected", false)
 
 	select {
 	case e := <-entryChan:
