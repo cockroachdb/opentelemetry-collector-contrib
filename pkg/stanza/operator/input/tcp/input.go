@@ -17,18 +17,21 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
-	"go.uber.org/zap"
-	"golang.org/x/text/encoding"
-
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/textutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
+	"go.uber.org/zap"
+	"golang.org/x/text/encoding"
 )
 
 // initialScannerBufferSize is the initial size of the per-connection scanner
 // buffer. It matches the minimum allowed max_log_size, so the buffer only grows
 // for connections that actually carry larger entries.
 const initialScannerBufferSize = 64 * 1024
+
+// TruncatedAttribute is set to true on entries that were cut to max_log_size,
+// so downstream operators can tell a bounded prefix from a complete record.
+const TruncatedAttribute = "log.record.truncated"
 
 // Input is an operator that listens for log entries over tcp.
 type Input struct {
@@ -132,7 +135,7 @@ func (i *Input) goHandleMessages(ctx context.Context, conn net.Conn, cancel cont
 				i.Logger().Error("IO copy net connection buffer error", zap.Error(err))
 			}
 			log := truncateMaxLog(buf.Bytes(), i.MaxLogSize)
-			i.handleMessage(ctx, conn, dec, log)
+			i.handleMessage(ctx, conn, dec, log, buf.Len() > i.MaxLogSize)
 			return
 		}
 
@@ -144,10 +147,11 @@ func (i *Input) goHandleMessages(ctx context.Context, conn net.Conn, cancel cont
 		scanner := bufio.NewScanner(conn)
 		scanner.Buffer(buf, i.MaxLogSize)
 
-		scanner.Split(i.truncatingSplitFunc())
+		split, lastTruncated := i.truncatingSplitFunc()
+		scanner.Split(split)
 
 		for scanner.Scan() {
-			i.handleMessage(ctx, conn, dec, scanner.Bytes())
+			i.handleMessage(ctx, conn, dec, scanner.Bytes(), lastTruncated())
 		}
 
 		if err := scanner.Err(); err != nil {
@@ -164,10 +168,13 @@ func (i *Input) goHandleMessages(ctx context.Context, conn net.Conn, cancel cont
 // entries down with it.
 //
 // The returned function carries per-connection state and must not be shared
-// between scanners.
-func (i *Input) truncatingSplitFunc() bufio.SplitFunc {
+// between scanners. The returned lastTruncated reports whether the token most
+// recently produced by the split func was truncated.
+func (i *Input) truncatingSplitFunc() (split bufio.SplitFunc, lastTruncated func() bool) {
 	discarding := false
-	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	truncated := false
+	split = func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		truncated = false
 		advance, token, err = i.splitFunc(data, atEOF)
 		if err != nil {
 			return 0, nil, err
@@ -187,7 +194,8 @@ func (i *Input) truncatingSplitFunc() bufio.SplitFunc {
 			// idle connection even though a complete entry is already
 			// buffered.
 			discarding = false
-			next, token, err := i.splitFunc(data[advance:], atEOF)
+			var next int
+			next, token, err = i.splitFunc(data[advance:], atEOF)
 			if err != nil {
 				return 0, nil, err
 			}
@@ -205,13 +213,17 @@ func (i *Input) truncatingSplitFunc() bufio.SplitFunc {
 			i.Logger().Warn("Log entry exceeds max_log_size, truncating",
 				zap.Int("max_log_size", i.MaxLogSize))
 			discarding = true
+			truncated = true
 			return len(data), data[:i.MaxLogSize], nil
 		}
 		return 0, nil, nil
 	}
+	return split, func() bool { return truncated }
 }
 
-func (i *Input) handleMessage(ctx context.Context, conn net.Conn, dec *encoding.Decoder, log []byte) {
+func (i *Input) handleMessage(
+	ctx context.Context, conn net.Conn, dec *encoding.Decoder, log []byte, truncated bool,
+) {
 	decoded, err := textutils.DecodeAsString(dec, log)
 	if err != nil {
 		i.Logger().Error("Failed to decode data", zap.Error(err))
@@ -239,6 +251,13 @@ func (i *Input) handleMessage(ctx context.Context, conn net.Conn, dec *encoding.
 			entry.AddAttribute("net.host.port", strconv.FormatInt(int64(addr.Port), 10))
 			entry.AddAttribute("net.host.name", i.resolver.GetHostFromIP(ip))
 		}
+	}
+
+	if truncated {
+		if entry.Attributes == nil {
+			entry.Attributes = make(map[string]any)
+		}
+		entry.Attributes[TruncatedAttribute] = true
 	}
 
 	err = i.Write(ctx, entry)
