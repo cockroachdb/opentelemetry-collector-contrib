@@ -12,15 +12,15 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
-	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtls"
-	"golang.org/x/text/encoding"
-
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/textutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/split"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/trim"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configtls"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
 )
 
 const (
@@ -68,6 +68,7 @@ type BaseConfig struct {
 	TLS              *configtls.ServerConfig `mapstructure:"tls,omitempty"`
 	AddAttributes    bool                    `mapstructure:"add_attributes,omitempty"`
 	OneLogPerPacket  bool                    `mapstructure:"one_log_per_packet,omitempty"`
+	TruncateJSON     bool                    `mapstructure:"truncate_json,omitempty"`
 	Encoding         string                  `mapstructure:"encoding,omitempty"`
 	SplitConfig      split.Config            `mapstructure:"multiline,omitempty"`
 	TrimConfig       trim.Config             `mapstructure:",squash"`
@@ -110,6 +111,17 @@ func (c Config) Build(set component.TelemetrySettings) (operator.Operator, error
 		return nil, err
 	}
 
+	// truncate_json repairs a byte prefix of one JSON object per entry, which
+	// requires UTF-8 bytes and newline-delimited entries.
+	if c.TruncateJSON {
+		if enc != unicode.UTF8 && enc != textutils.UTF8Raw {
+			return nil, fmt.Errorf("truncate_json requires utf-8 encoding, got %q", c.Encoding)
+		}
+		if c.SplitConfig.LineStartPattern != "" || c.SplitConfig.LineEndPattern != "" {
+			return nil, errors.New("truncate_json cannot be combined with multiline patterns")
+		}
+	}
+
 	if c.SplitFuncBuilder == nil {
 		c.SplitFuncBuilder = c.defaultSplitFuncBuilder
 	}
@@ -132,6 +144,7 @@ func (c Config) Build(set component.TelemetrySettings) (operator.Operator, error
 		MaxLogSize:      int(c.MaxLogSize),
 		addAttributes:   c.AddAttributes,
 		OneLogPerPacket: c.OneLogPerPacket,
+		truncateJSON:    c.TruncateJSON,
 		encoding:        enc,
 		splitFunc:       splitFunc,
 		backoff: backoff.Backoff{

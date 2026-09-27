@@ -25,6 +25,7 @@ The TCP Receiver receives logs over TCP.
 | `tls`                     | nil                  | An optional `TLS` configuration (see the TLS configuration section)                                                |
 | `attributes`              | {}                   | A map of `key: value` pairs to add to the entry's attributes                                                       |
 | `one_log_per_packet`      | false                | Skip log tokenization, set to true if logs contains one log per record and multiline is not used.  This will improve performance.                                                 |
+| `truncate_json`           | false                | Repair truncated JSON entries into valid JSON: a string value cut by truncation keeps its prefix and ends in `…`, incomplete members are dropped, and open objects and arrays are closed. Entries that are not a JSON object are left as a plain prefix. Requires utf-8 encoding and cannot be combined with `multiline`. |
 | `resource`                | {}                   | A map of `key: value` pairs to add to the entry's resource                                                         |
 | `add_attributes`          | false                | Adds `net.*` attributes according to [semantic convention][https://github.com/open-telemetry/semantic-conventions/blob/main/docs/registry/attributes/network.md#network-attributes] |
 | `multiline`               |                      | A `multiline` configuration block. See below for details                                                           |
