@@ -17,12 +17,11 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
-	"go.uber.org/zap"
-	"golang.org/x/text/encoding"
-
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/textutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
+	"go.uber.org/zap"
+	"golang.org/x/text/encoding"
 )
 
 // initialScannerBufferSize is the initial size of the per-connection scanner
@@ -41,6 +40,7 @@ type Input struct {
 	MaxLogSize      int
 	addAttributes   bool
 	OneLogPerPacket bool
+	truncateJSON    bool
 
 	listener net.Listener
 	cancel   context.CancelFunc
@@ -225,6 +225,10 @@ func (i *Input) truncatingSplitFunc() (split bufio.SplitFunc, lastTruncated func
 func (i *Input) handleMessage(
 	ctx context.Context, conn net.Conn, dec *encoding.Decoder, log []byte, truncated bool,
 ) {
+	if truncated && i.truncateJSON {
+		log = i.repairTruncated(log)
+	}
+
 	decoded, err := textutils.DecodeAsString(dec, log)
 	if err != nil {
 		i.Logger().Error("Failed to decode data", zap.Error(err))
@@ -265,6 +269,22 @@ func (i *Input) handleMessage(
 	if err != nil {
 		i.Logger().Error("Failed to write entry", zap.Error(err))
 	}
+}
+
+// repairTruncated returns log repaired into valid JSON, or log unchanged when
+// it cannot be repaired. A panic in the repair must not take down the
+// receiver, so it is recovered and the plain prefix is kept.
+func (i *Input) repairTruncated(log []byte) (out []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			i.Logger().Error("Failed to repair truncated JSON entry", zap.Any("panic", r))
+			out = log
+		}
+	}()
+	if repaired, ok := repairTruncatedJSON(log, i.MaxLogSize); ok {
+		return repaired
+	}
+	return log
 }
 
 func truncateMaxLog(data []byte, maxLogSize int) (token []byte) {
