@@ -12,15 +12,16 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configtls"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
+
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/textutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/split"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/trim"
-	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtls"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
 )
 
 const (

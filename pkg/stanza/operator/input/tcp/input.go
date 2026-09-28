@@ -17,11 +17,12 @@ import (
 	"time"
 
 	"github.com/jpillora/backoff"
+	"go.uber.org/zap"
+	"golang.org/x/text/encoding"
+
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/textutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/operator/helper"
-	"go.uber.org/zap"
-	"golang.org/x/text/encoding"
 )
 
 // initialScannerBufferSize is the initial size of the per-connection scanner
